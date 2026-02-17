@@ -1,0 +1,598 @@
+@startuml
+namespace Curriculum {
+    class Curriculum << (S,Aquamarine) >> {
+        + CurriculumID uint16
+        + CurriculumName string
+        + CurriculumCode string
+        + DepartmentID uint16
+        + YearLevels []YearLevel
+
+        + GetTotalSections() int
+        + GetTotalSectionsBySemester(semester_idx int) int
+
+    }
+    class Semester << (S,Aquamarine) >> {
+        + Name string
+        + Sections int
+        + Subjects []Subject
+
+    }
+    class Subject << (S,Aquamarine) >> {
+        + ID uint16
+        + Code string
+        + Name string
+        + LecHours uint8
+        + LabHours uint8
+        + BitFlags uint16
+        + DesignatedInstructors []uint16
+
+        + Serialize() uint32
+        + Deserialize(serialized_data uint32) 
+        + IsGymType() bool
+
+    }
+    class YearLevel << (S,Aquamarine) >> {
+        + Name string
+        + IsActive bool
+        + Semesters []Semester
+
+    }
+}
+
+
+"Curriculum.Curriculum""uses" o-- "Curriculum.YearLevel"
+"Curriculum.Semester""uses" o-- "Curriculum.Subject"
+"Curriculum.YearLevel""uses" o-- "Curriculum.Semester"
+
+namespace Departments {
+    class Department << (S,Aquamarine) >> {
+        + DepartmentID uint16
+        + Code string
+        + Name string
+        + SaltedHashedPassword string
+
+    }
+}
+
+
+
+namespace GeneticAlgorithm {
+    class EncodingResource << (S,Aquamarine) >> {
+        + IsSchedIdxToSubIdToSkip <font color=blue>map</font>[uint16]<font color=blue>map</font>[uint16]bool
+        + DeptIdToInstructors <font color=blue>map</font>[uint16][]Instructors.Instructor
+        + DeptIdToRoomtypeToRooms <font color=blue>map</font>[uint16]<font color=blue>map</font>[uint16][]Rooms.Room
+
+        + MakeCopy() (*EncodingResource, error)
+
+    }
+    class GeneticAlgorithm.IterReturnType << (T, #FF7700) >>  {
+    }
+    class IterIndices << (S,Aquamarine) >> {
+        + Usi int
+        + Curriculum int
+        + YearLevel int
+        + Semester int
+        + Section int
+
+    }
+    class IterValues << (S,Aquamarine) >> {
+        + Sched Schedule.UniTimeTables
+        + WeekSched *Schedule.WeekTimeTable
+        + Curriculum *Curriculum.Curriculum
+        + YearLevel *Curriculum.YearLevel
+        + Semester *Curriculum.Semester
+
+    }
+    class MissingResources << (S,Aquamarine) >> {
+        + InstructorTimeSlot int
+        + RoomLecTimeSlot int
+        + RoomLabTimeSlot int
+        + RoomGymTimeSlot int
+
+    }
+    class SchedAndResources << (S,Aquamarine) >> {
+        + UniSched Schedule.UniTimeTables
+        + Resources *EncodingResource
+
+    }
+    class Totals << (S,Aquamarine) >> {
+        + DepartmentID uint16
+        + SectionCount int
+        + LecRoomHours int
+        + LabRoomHours int
+        + GymRoomHours int
+        + InstructorHours float64
+        + InstructorCount int
+        + SubjectLecHours int
+        + SubjectLabHours int
+        + SubjectGymHours int
+        + RoomCapacity int
+        + RoomLabCount int
+        + RoomLecCount int
+        + Semester int
+        + DepartmentName string
+        + Courses int
+        + LecSubjectCount int
+        + LabSubjectCount int
+
+    }
+    class inherit_trait_result << (S,Aquamarine) >> {
+        - success bool
+        - has_extended_subject bool
+
+    }
+}
+
+
+"GeneticAlgorithm.EncodingResource""uses" o-- "Instructors.Instructor"
+"GeneticAlgorithm.EncodingResource""uses" o-- "Rooms.Room"
+"GeneticAlgorithm.IterValues""uses" o-- "Curriculum.Curriculum"
+"GeneticAlgorithm.IterValues""uses" o-- "Curriculum.Semester"
+"GeneticAlgorithm.IterValues""uses" o-- "Curriculum.YearLevel"
+"GeneticAlgorithm.IterValues""uses" o-- "Schedule.UniTimeTables"
+"GeneticAlgorithm.IterValues""uses" o-- "Schedule.WeekTimeTable"
+"GeneticAlgorithm.SchedAndResources""uses" o-- "GeneticAlgorithm.EncodingResource"
+"GeneticAlgorithm.SchedAndResources""uses" o-- "Schedule.UniTimeTables"
+
+namespace Instructors {
+    class Instructor << (S,Aquamarine) >> {
+        + InstructorID uint16
+        + DepartmentID uint16
+        + FirstName string
+        + MiddleInitial string
+        + LastName string
+        + AssignedSubjects int
+        + TotalTeachingHours float32
+        + Time InstructorTimeSlotBitMap
+
+    }
+    class InstructorTimeSlotBitMap << (S,Aquamarine) >> {
+        + SetAvailability(available bool, day int, time_slot int) 
+        + GetAvailability(day int, time_slot int) bool
+        + Serialize() []byte
+        + Deserialize(serialized []byte) 
+        + Stringify() []string
+        + StringParse(string_slice []string) error
+
+    }
+    class InstructorWithTimeString << (S,Aquamarine) >> {
+        + InstructorID uint16
+        + DepartmentID uint16
+        + FirstName string
+        + MiddleInitial string
+        + LastName string
+        + Time []string
+
+    }
+    class Instructors.InstructorTimeSlotBitMap << (T, #FF7700) >>  {
+    }
+}
+
+
+"Instructors.Instructor""uses" o-- "Instructors.InstructorTimeSlotBitMap"
+
+namespace Rooms {
+    class Room << (S,Aquamarine) >> {
+        - timeSlotClassCount []uint8
+
+        + RoomID uint16
+        + DepartmentID uint16
+        + Capacity uint16
+        + RoomType uint16
+        + Name string
+
+        + SetTimeSlotClassCount(day int, time_slot int, class_count uint8) 
+        + IncTimeSlotClassCount(day int, time_slot int) 
+        + GetTimeSlotClassCount(day int, time_slot int) uint8
+
+    }
+}
+
+
+
+namespace RouteGlobals {
+    class DeptSchedGenKey << (S,Aquamarine) >> {
+        + DepartmentID uint16
+        + Semester int
+
+    }
+    class RouteGlobals.SchedGenStatusType << (T, #FF7700) >>  {
+    }
+    class SchedGenResult << (S,Aquamarine) >> {
+        + Status SchedGenStatusType
+        + Message string
+
+    }
+    class scheduleCache << (S,Aquamarine) >> {
+        - rw_mutex sync.RWMutex
+        - semester_schedule []Schedule.UniTimeTables
+
+    }
+}
+
+
+"RouteGlobals.SchedGenResult""uses" o-- "RouteGlobals.SchedGenStatusType"
+"RouteGlobals.scheduleCache""uses" o-- "Schedule.UniTimeTables"
+"RouteGlobals.scheduleCache""uses" o-- "sync.RWMutex"
+
+namespace RoutesV1 {
+    class CurriculumMicroData << (S,Aquamarine) >> {
+        + CurriculumID uint16
+        + CurriculumName string
+        + CurriculumCode string
+        + YearLevels []YearLevelMicroData
+
+    }
+    class CurriculumPageItem << (S,Aquamarine) >> {
+        + CurriculumID uint16
+        + DepartmentID uint16
+        + CurriculumName string
+        + CurriculumCode string
+
+    }
+    class CurriculumSectionKey << (S,Aquamarine) >> {
+        + YearLevelIndex int
+        + SemesterIndex int
+        + SectionIndex int
+
+    }
+    class CurriculumTablePage << (S,Aquamarine) >> {
+        + Curriculums []CurriculumPageItem
+        + TotalCurriculums int
+
+    }
+    class DepartmentTablePage << (S,Aquamarine) >> {
+        + Departments []Departments.Department
+        + TotalDepartments int
+
+    }
+    class InstructorTablePage << (S,Aquamarine) >> {
+        + Instructors []Instructors.InstructorWithTimeString
+        + TotalInstructors int
+
+    }
+    class RoomTablePage << (S,Aquamarine) >> {
+        + Rooms []Rooms.Room
+        + TotalRooms int
+
+    }
+    class SubjectAssignmentInfo << (S,Aquamarine) >> {
+        + SubjectID uint16
+        + InstructorID uint16
+        + RoomID uint16
+        + SubjectCode string
+        + InstructorLastName string
+        + RoomName string
+        + DayIdx uint8
+        + TimeSlotIdx uint8
+        + SubjectTimeSlots uint8
+
+    }
+    class SubjectTablePage << (S,Aquamarine) >> {
+        + Subjects []Curriculum.Subject
+        + TotalSubjects int
+
+    }
+    class YearLevelMicroData << (S,Aquamarine) >> {
+        + Name string
+        + Sections int
+
+    }
+}
+
+
+"RoutesV1.CurriculumMicroData""uses" o-- "RoutesV1.YearLevelMicroData"
+"RoutesV1.CurriculumTablePage""uses" o-- "RoutesV1.CurriculumPageItem"
+"RoutesV1.DepartmentTablePage""uses" o-- "Departments.Department"
+"RoutesV1.InstructorTablePage""uses" o-- "Instructors.InstructorWithTimeString"
+"RoutesV1.RoomTablePage""uses" o-- "Rooms.Room"
+"RoutesV1.SubjectTablePage""uses" o-- "Curriculum.Subject"
+
+namespace RoutesV2 {
+    class InstructorSubjectAssignmentInfo << (S,Aquamarine) >> {
+        + SubjectCode string
+        + CourseSection string
+        + RoomName string
+        + DayIdx uint8
+        + TimeSlotIdx uint8
+        + SubjectTimeSlots uint8
+
+    }
+    class InstructorTableItem << (S,Aquamarine) >> {
+        + InstructorID uint16
+        + DepartmentID uint16
+        + FirstName string
+        + MiddleInitial string
+        + LastName string
+
+    }
+    class InstructorTablePage << (S,Aquamarine) >> {
+        + Instructors []InstructorTableItem
+        + TotalInstructors int
+
+    }
+    class RoutesV2.TimeSlotMoveAvailability << (T, #FF7700) >>  {
+    }
+    class RoutesV2.WeekTimeTableSubjects << (T, #FF7700) >>  {
+    }
+    class "[]RoutesV1.SubjectAssignmentInfo" as RoutesV1SubjectAssignmentInfo {
+        'This class was created so that we can correctly have an alias pointing to this name. Since it contains dots that can break namespaces
+    }
+}
+
+
+"RoutesV2.InstructorTablePage""uses" o-- "RoutesV2.InstructorTableItem"
+
+namespace Schedule {
+    class DayTimeTable << (S,Aquamarine) >> {
+        + GetTimeSlot(time_slot_idx int) *TimeSlot
+        + IsTimeAvailable(time_slot_idx int, time_slot_size int) bool
+
+    }
+    class Schedule.DayTimeTable << (T, #FF7700) >>  {
+    }
+    class Schedule.UniTimeTables << (T, #FF7700) >>  {
+    }
+    class Schedule.WeekTimeTable << (T, #FF7700) >>  {
+    }
+    class TimeSlot << (S,Aquamarine) >> {
+        - subjectID uint16
+        - instructorID uint16
+        - roomID uint16
+
+        + Set(subject_id uint16, instructor_id uint16, room_id uint16) error
+        + GetSubjectID() uint16
+        + GetInstructorID() uint16
+        + GetRoomID() uint16
+        + SetSubjectID(subject_id uint16) error
+        + SetInstructorID(instructor_id uint16) error
+        + SetRoomID(room_id uint16) error
+
+    }
+    class TimeSlotSubjectJSON << (S,Aquamarine) >> {
+        + SubjectID uint16
+        + InstructorID uint16
+        + RoomID uint16
+        + Day int
+        + StartingTimeSlot int
+        + TimeSlotSize int
+
+    }
+    class UniInstructorValidationError << (S,Aquamarine) >> {
+        + Msg string
+        + Day int
+        + TimeSlot int
+        + InstructorID uint16
+        + OverlappingSections []uint16
+
+    }
+    class UniRoomValidationError << (S,Aquamarine) >> {
+        + Msg string
+        + Day int
+        + TimeSlot int
+        + RooomID uint16
+        + OverlappingSections []uint16
+
+    }
+    class UniTimeTables << (S,Aquamarine) >> {
+        + GetWeekTimeTable(class_section_idx int) *WeekTimeTable
+        + IsEmpty() bool
+        + VerticalRangedValidation(rooms []Rooms.Room, day_start int, day_size int, time_slot_start int, time_slot_size int) []error
+        + VerticalValidation(rooms []Rooms.Room) []error
+
+    }
+    class WeekTimeTable << (S,Aquamarine) >> {
+        + GetDayTimeTable(day_idx int) *DayTimeTable
+        + GetWeekSubjectsJSON() []TimeSlotSubjectJSON
+
+    }
+    class roomCountAndCapacity << (S,Aquamarine) >> {
+        + OverlappingSections []uint16
+        + Capacity uint16
+
+    }
+}
+
+
+
+namespace StorageResources {
+    class JsonReader << (S,Aquamarine) >> {
+        + ReadAllCurriculum() ([]Curriculum.Curriculum, error)
+        + ReadCurriculum(curriculum_id uint16) (*Curriculum.Curriculum, error)
+        + ReadAllDepartments() ([]Departments.Department, error)
+        + ReadDepartment(department_id uint16) (*Departments.Department, error)
+        + ReadAllInstructors() ([]Instructors.Instructor, error)
+        + ReadDepartmentInstructors(department_id int) ([]Instructors.Instructor, error)
+        + ReadAllInstructorsWithTimeString() ([]Instructors.InstructorWithTimeString, error)
+        + ReadInstructor(instructor_id uint16) (*Instructors.Instructor, error)
+        + ReadAllRooms() ([]Rooms.Room, error)
+        + ReadRoom(room_id uint16) (*Rooms.Room, error)
+        + ReadAllSubjects() ([]Curriculum.Subject, error)
+        + ReadSubject(subject_id uint16) (*Curriculum.Subject, error)
+
+    }
+    class JsonWriter << (S,Aquamarine) >> {
+        + CreateCurriculum(new_curriculum Curriculum.Curriculum) (uint16, error)
+        + UpdateCurriculum(updated_curriculum Curriculum.Curriculum) error
+        + DeleteCurriculum(curriculum_id uint16) error
+        + CreateDepartment(new_department Departments.Department) error
+        + UpdateDepartment(department_to_update Departments.Department) error
+        + DeleteDepartment(department_id uint16) error
+        + CreateInstructor(new_instructor Instructors.Instructor) error
+        + UpdateInstructor(instructor_to_update Instructors.Instructor) error
+        + DeleteInstructor(instructor_id uint16) error
+        + CreateRoom(new_room Rooms.Room) error
+        + UpdateRoom(room_to_update Rooms.Room) error
+        + DeleteRoom(room_id uint16) error
+        + CreateSubject(new_subject Curriculum.Subject) error
+        + UpdateSubject(subject_to_update Curriculum.Subject) error
+        + DeleteSubject(subject_id uint16) error
+
+    }
+    class MongoDB << (S,Aquamarine) >> {
+        + Client *mongo.Client
+        + Departments *mongo.Collection
+        + Curriculums *mongo.Collection
+        + Subjects *mongo.Collection
+        + Rooms *mongo.Collection
+        + Instructors *mongo.Collection
+
+    }
+    class MongodbReader << (S,Aquamarine) >> {
+        + Mongo *MongoDB
+
+        + ReadAllCurriculum() ([]Curriculum.Curriculum, error)
+        + ReadCurriculum(curriculum_id uint16) (*Curriculum.Curriculum, error)
+        + ReadAllDepartments() ([]Departments.Department, error)
+        + ReadDepartment(department_id uint16) (*Departments.Department, error)
+        + ReadAllInstructors() ([]Instructors.Instructor, error)
+        + ReadInstructor(instructor_id uint16) (*Instructors.Instructor, error)
+        + ReadDepartmentInstructors(department_id int) ([]Instructors.Instructor, error)
+        + ReadAllInstructorsWithTimeString() ([]Instructors.InstructorWithTimeString, error)
+        + ReadAllRooms() ([]Rooms.Room, error)
+        + ReadRoom(room_id uint16) (*Rooms.Room, error)
+        + ReadAllSubjects() ([]Curriculum.Subject, error)
+        + ReadSubject(subject_id uint16) (*Curriculum.Subject, error)
+
+    }
+    class MongodbWriter << (S,Aquamarine) >> {
+        - mutex sync.Mutex
+
+        + Mongo *MongoDB
+
+        + CreateCurriculum(new_curriculum Curriculum.Curriculum) (uint16, error)
+        + UpdateCurriculum(updated_curriculum Curriculum.Curriculum) error
+        + DeleteCurriculum(curriculum_id uint16) error
+        + CreateDepartment(new_department Departments.Department) error
+        + UpdateDepartment(updated_department Departments.Department) error
+        + DeleteDepartment(department_id uint16) error
+        + CreateInstructor(arg_instructor Instructors.Instructor) error
+        + UpdateInstructor(arg_updated_instructor Instructors.Instructor) error
+        + DeleteInstructor(instructor_id uint16) error
+        + CreateRoom(new_room Rooms.Room) error
+        + UpdateRoom(updated_room Rooms.Room) error
+        + DeleteRoom(room_id uint16) error
+        + CreateSubject(new_subject Curriculum.Subject) error
+        + UpdateSubject(updated_subject Curriculum.Subject) error
+        + DeleteSubject(subject_id uint16) error
+
+    }
+    class Persistence << (S,Aquamarine) >> {
+        + ReaderService readerRepository
+        + WriterService writerRepository
+
+    }
+    interface readerRepository  {
+        + ReadAllCurriculum() ([]Curriculum.Curriculum, error)
+        + ReadCurriculum(curriculum_id uint16) (*Curriculum.Curriculum, error)
+        + ReadAllSubjects() ([]Curriculum.Subject, error)
+        + ReadSubject(subject_id uint16) (*Curriculum.Subject, error)
+        + ReadAllDepartments() ([]Departments.Department, error)
+        + ReadDepartment(department_id uint16) (*Departments.Department, error)
+        + ReadAllInstructors() ([]Instructors.Instructor, error)
+        + ReadInstructor(instructor_id uint16) (*Instructors.Instructor, error)
+        + ReadDepartmentInstructors(department_id int) ([]Instructors.Instructor, error)
+        + ReadAllRooms() ([]Rooms.Room, error)
+        + ReadRoom(room_id uint16) (*Rooms.Room, error)
+
+    }
+    interface writerRepository  {
+        + CreateDepartment(new_department Departments.Department) error
+        + UpdateDepartment(department_to_update Departments.Department) error
+        + DeleteDepartment(department_id uint16) error
+        + CreateSubject(new_subject Curriculum.Subject) error
+        + UpdateSubject(subject_to_update Curriculum.Subject) error
+        + DeleteSubject(subject_id uint16) error
+        + CreateCurriculum(new_curriculum Curriculum.Curriculum) (uint16, error)
+        + UpdateCurriculum(updated_curriculum Curriculum.Curriculum) error
+        + DeleteCurriculum(curriculum_id uint16) error
+        + CreateInstructor(new_instructor Instructors.Instructor) error
+        + UpdateInstructor(instructor_to_update Instructors.Instructor) error
+        + DeleteInstructor(instructor_id uint16) error
+        + CreateRoom(new_room Rooms.Room) error
+        + UpdateRoom(room_to_update Rooms.Room) error
+        + DeleteRoom(room_id uint16) error
+
+    }
+}
+
+"StorageResources.readerRepository" <|-- "implements""StorageResources.JsonReader"
+"StorageResources.writerRepository" <|-- "implements""StorageResources.JsonWriter"
+"StorageResources.readerRepository" <|-- "implements""StorageResources.MongodbReader"
+"StorageResources.writerRepository" <|-- "implements""StorageResources.MongodbWriter"
+
+"StorageResources.MongoDB""uses" o-- "mongo.Client"
+"StorageResources.MongoDB""uses" o-- "mongo.Collection"
+"StorageResources.MongodbReader""uses" o-- "StorageResources.MongoDB"
+"StorageResources.MongodbWriter""uses" o-- "StorageResources.MongoDB"
+"StorageResources.MongodbWriter""uses" o-- "sync.Mutex"
+"StorageResources.Persistence""uses" o-- "StorageResources.readerRepository"
+"StorageResources.Persistence""uses" o-- "StorageResources.writerRepository"
+
+namespace StorageSchedule {
+    class JsonReader << (S,Aquamarine) >> {
+        + LoadSchedules(semester int) (Schedule.UniTimeTables, error)
+
+    }
+    class JsonWriter << (S,Aquamarine) >> {
+        + SaveSchedules(university_schedule Schedule.UniTimeTables, semester int) error
+
+    }
+    class MongoDB << (S,Aquamarine) >> {
+        + Client *mongo.Client
+        + Schedules *mongo.Collection
+
+    }
+    class MongodbReader << (S,Aquamarine) >> {
+        + Mongo *MongoDB
+
+        + LoadSchedules(semester int) (Schedule.UniTimeTables, error)
+
+    }
+    class MongodbSchedule << (S,Aquamarine) >> {
+        + Semester int
+        + Schedule []byte
+
+    }
+    class MongodbWriter << (S,Aquamarine) >> {
+        + Mongo *MongoDB
+
+        + SaveSchedules(university_schedule Schedule.UniTimeTables, semester int) error
+
+    }
+    class Persistence << (S,Aquamarine) >> {
+        + SaveService saveRepository
+        + LoadService loadRepository
+
+    }
+    interface loadRepository  {
+        + LoadSchedules(semester int) (Schedule.UniTimeTables, error)
+
+    }
+    interface saveRepository  {
+        + SaveSchedules(university_schedule Schedule.UniTimeTables, semester int) error
+
+    }
+}
+
+"StorageSchedule.loadRepository" <|-- "implements""StorageSchedule.JsonReader"
+"StorageSchedule.saveRepository" <|-- "implements""StorageSchedule.JsonWriter"
+"StorageSchedule.loadRepository" <|-- "implements""StorageSchedule.MongodbReader"
+"StorageSchedule.saveRepository" <|-- "implements""StorageSchedule.MongodbWriter"
+
+"StorageSchedule.MongoDB""uses" o-- "mongo.Client"
+"StorageSchedule.MongoDB""uses" o-- "mongo.Collection"
+"StorageSchedule.MongodbReader""uses" o-- "StorageSchedule.MongoDB"
+"StorageSchedule.MongodbWriter""uses" o-- "StorageSchedule.MongoDB"
+"StorageSchedule.Persistence""uses" o-- "StorageSchedule.loadRepository"
+"StorageSchedule.Persistence""uses" o-- "StorageSchedule.saveRepository"
+
+"RoutesV2.RoutesV1SubjectAssignmentInfo" #.. "alias of""RoutesV2.WeekTimeTableSubjects"
+"Schedule.[]DayTimeTable" #.. "alias of""Schedule.WeekTimeTable"
+"Schedule.[]TimeSlot" #.. "alias of""Schedule.DayTimeTable"
+"Schedule.[]WeekTimeTable" #.. "alias of""Schedule.UniTimeTables"
+"__builtin__.[][]bool" #.. "alias of""RoutesV2.TimeSlotMoveAvailability"
+"__builtin__.[]uint64" #.. "alias of""Instructors.InstructorTimeSlotBitMap"
+"__builtin__.int" #.. "alias of""GeneticAlgorithm.IterReturnType"
+"__builtin__.string" #.. "alias of""RouteGlobals.SchedGenStatusType"
+@enduml

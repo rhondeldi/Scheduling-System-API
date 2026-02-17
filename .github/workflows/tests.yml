@@ -1,0 +1,134 @@
+name: tests
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches: [ "canary", "main", "development" ]
+
+jobs:
+  run_tests:
+
+    runs-on: ubuntu-latest
+
+    permissions: 
+        contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go 1.24.x
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - run: go version
+
+      - name: Check gh-cli user
+        run: gh auth status | grep Logged
+        env:
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Download Test Resources
+        run: make devr
+        env:
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: View Temporary Data Tree
+        run: tree scheduling-system-temporary-data
+
+      - name: I
+        if: runner.os == 'Linux'
+        run: cat scheduling-system-temporary-data/instructors.json | sed -E 's/("FirstName":[[:space:]]*)"[^"]*"/\1"****"/g;s/("MiddleInitial":[[:space:]]*)"[^"]*"/\1"****"/g;s/("LastName":[[:space:]]*)"[^"]*"/\1"****"/g' scheduling-system-temporary-data/instructors.json
+
+      - name: Unit Tests
+        run: |
+          echo "running generate schedule test encoding individual"
+
+          make devr
+          go clean -testcache && go test -run TestEstimateResourceAvailabilityFirstSem ./GeneticAlgorithm -timeout 0
+
+          make devr
+          go clean -testcache && go test -run TestEstimateResourceAvailabilitySecondSem ./GeneticAlgorithm -timeout 0
+
+          make devr
+          go clean -testcache && go test -run TestNewPopulationFirstSem ./GeneticAlgorithm -timeout 0
+
+          make devr
+          go clean -testcache && go test -run TestNewPopulationSecondSem ./GeneticAlgorithm -timeout 0
+
+          make devr
+          go clean -testcache && go test -run TestNewPopulation1stSemWithDepartmentSelection ./GeneticAlgorithm -timeout 0
+
+          make devr
+          go clean -testcache && go test -run TestNewPopulation2ndSemWithDepartmentSelection ./GeneticAlgorithm -timeout 0
+
+          make devr
+          go clean -testcache && go test -run TestRandomMutations ./GeneticAlgorithm -timeout 0
+
+          echo "running test resource methods"
+
+          make devr
+          go clean -testcache && go test -run Test ./Resources/Curriculum -timeout 0
+
+          make devr
+          go clean -testcache && go test -run Test ./Resources/Instructors -timeout 0
+
+          make devr
+          go clean -testcache && go test -run Test ./Resources/Rooms -timeout 0
+
+          echo "running test schedule data structures"
+
+          make devr
+          go clean -testcache && go test -run Test ./Schedule -timeout 0
+
+          echo "running test persistence methods"
+
+          make devr
+          go clean -testcache && go test -run Test ./StorageResources -timeout 0
+
+          make devr
+          go clean -testcache && go test -run Test ./StorageSchedule -timeout 0
+
+          echo "running test others"
+
+          make devr
+          go clean -testcache && go test -run Test ./Tests/schedule_datastructure_basic -timeout 0
+
+          go clean -testcache && go test -run Test ./Utils -timeout 0
+        env:
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          LOG_MODE: verbose
+
+      - name: Run Build
+        run: make build
+
+      - name: Change Node Fetch Wait Value
+        run: sed -i 's/ 16)); / 4)); /' Tests/schedule-serialization.js
+
+      - name: Check Node Fetch Wait Value
+        run: grep -nr "1000 \* 60 \*" ./Tests
+
+      - name: Integration Test - generate schedule using node.js fetch calls
+        run: make devr && ./app & sleep 1 && node Tests/schedule-serialization.js
+        env:
+          PORT: 3000
+          LOG_MODE: verbose
+          GIN_MODE: debug
+          PROTOCOL: tcp
+          NODE_VERSION: lts
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Integration Tests - edit curriculum sections
+        run: |
+          echo "running integration tests"
+
+          make devr
+          go clean -testcache && go test -run TestIntegrationEditCurriculumSectionV1 ./ -timeout 0
+
+          make devr
+          go clean -testcache && go test -run TestIntegrationEditCurriculumSectionV2 ./ -timeout 0
+
+        env:
+          LOG_MODE: verbose
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}

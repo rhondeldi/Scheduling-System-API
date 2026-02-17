@@ -1,0 +1,4 @@
+[
+  {"DepartmentID": 0, "Code": "GEN", "Name": "General"},
+  {"DepartmentID": 1, "Code": "DEFAULT", "Name": "DEPARTMENT OF DEFAULT"}
+]
