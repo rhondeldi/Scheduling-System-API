@@ -10,6 +10,7 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/contrib/static"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"github.com/mrdcvlsc/scheduling-system-backend/Auth"
 	"github.com/mrdcvlsc/scheduling-system-backend/RouteGlobals"
 	"github.com/mrdcvlsc/scheduling-system-backend/Routes/RoutesV1"
@@ -21,6 +22,11 @@ import (
 
 func main() {
 	fmt.Println("Starting backend service")
+
+	env_err := godotenv.Load()
+	if env_err != nil {
+		fmt.Println("Warning: .env file not loaded")
+	}
 
 	switch os.Getenv("USE_DATABASE") {
 
@@ -115,16 +121,13 @@ func main() {
 	router.Use(static.Serve("/", static.LocalFile("./dist", true)))
 	router.Use(sessions.Sessions("session_id", Auth.SessionStore))
 
-	if (os.Getenv("GIN_MODE") != "release") && (os.Getenv("DEV_MODE") != "local_release") {
-		router.Use(cors.New(cors.Config{
-			AllowOrigins:     []string{"http://localhost:5173", "http://127.0.0.1:5173", "http://192.168.1.*:5173", "http://192.168.0.*:5173"},
-			AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Accept"},
-			ExposeHeaders:    []string{"Content-Length"},
-			AllowCredentials: true,
-			AllowWildcard:    true, // Enable wildcard support for 192.168.1.*
-		}))
-	}
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Accept"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+	}))
 
 	//////////////////////////////////////////////////////////////////////////
 	//                              API-v1
