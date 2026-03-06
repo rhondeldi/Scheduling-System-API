@@ -24,14 +24,13 @@ jobs:
         with:
           go-version: '1.24.x'
       - run: go version
-      - name: Authenticate GitHub CLI
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Verify GitHub auth (non-interactive)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Check gh-cli user
-        run: gh auth status | grep Logged
-        env:
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+        run: |
+          gh auth status
+          gh api rate_limit >/dev/null
 
       - name: Download Test Resources
         run: make devr
