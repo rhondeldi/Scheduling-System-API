@@ -21,7 +21,11 @@ jobs:
         with:
           go-version: '1.24.x'
       - run: go version
-
+      - name: Authenticate GitHub CLI
+        run: gh auth login --with-token < token.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
       - name: Check gh-cli user
         run: gh auth status | grep Logged
         env:
