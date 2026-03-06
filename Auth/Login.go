@@ -105,7 +105,7 @@ func Login(ctx *gin.Context) {
 	log.Printf("department ID to login : %d", department_found.DepartmentID)
 
 	if department_logged_in == nil {
-		session.Set("department_user", &department_found.DepartmentID)
+		session.Set("department_user", department_found.DepartmentID)
 
 		log.Print("Login: [saving session]")
 		err_save_session := session.Save()
@@ -151,13 +151,16 @@ func Who(c *gin.Context) {
 func LogOut(c *gin.Context) {
 	session := sessions.Default(c)
 
-	user := session.Get("department_user")
-	if user == nil {
+	departmentUser := session.Get("department_user")
+	adminUser := session.Get("admin_user")
+
+	if departmentUser == nil && adminUser == nil {
 		c.String(http.StatusForbidden, "you're not logged in")
 		return
 	}
 
 	session.Delete("department_user")
+	session.Delete("admin_user")
 
 	if err_save_session := session.Save(); err_save_session != nil {
 		c.String(http.StatusInternalServerError, "logout failed")

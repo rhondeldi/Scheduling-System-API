@@ -28,6 +28,10 @@ func main() {
 		fmt.Println("Warning: .env file not loaded")
 	}
 
+	if sessionInitErr := Auth.InitSessionStore(); sessionInitErr != nil {
+		panic(fmt.Sprintf("failed to initialize session store: %s", sessionInitErr.Error()))
+	}
+
 	switch os.Getenv("USE_DATABASE") {
 
 	case "MongoDB":
@@ -140,10 +144,12 @@ func main() {
 
 	// ============= auth =============
 
+	router.POST("/auth_admin_login", Auth.AdminLogin)
 	router.POST("/auth_gasss_login", Auth.Login)
 	v1.POST("/department_add", RoutesV1.PostDepartment)
 
 	router.DELETE("/auth_gasss_logout", Auth.LogOut)
+	router.GET("/admin_who", Auth.AdminWho)
 	router.GET("/who", Auth.Who)
 
 	// ============= department routes and handlers =============
