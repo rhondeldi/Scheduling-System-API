@@ -25,7 +25,8 @@ jobs:
         run: gh auth login --with-token < token.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+      - name: Create token.txt
+        run: echo "${{ secrets.GITHUB_TOKEN }}" > token.txt
       - name: Check gh-cli user
         run: gh auth status | grep Logged
         env:
