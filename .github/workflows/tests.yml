@@ -23,10 +23,9 @@ jobs:
           go-version: "1.24.x"
       - run: go version
 
-      - name: Check gh-cli user
-        run: gh auth status | grep Logged
+      - name: Verify GitHub auth (non-interactive)
         env:
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Download Test Resources
         run: make devr
@@ -130,4 +129,4 @@ jobs:
 
         env:
           LOG_MODE: verbose
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}

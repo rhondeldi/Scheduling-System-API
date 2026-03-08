@@ -20,7 +20,12 @@ jobs:
         with:
           go-version: "1.24.x"
       - run: go version
-
+      - name: Authenticate GitHub CLI
+        run: gh auth login --with-token < token.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create token.txt
+        run: echo "${{ secrets.GITHUB_TOKEN }}" > token.txt
       - name: Check gh-cli user
         run: gh auth status | grep Logged
         env:
@@ -39,4 +44,8 @@ jobs:
       - name: Benchmark Stress Test
         run: go test -run=BenchmarkIntegrationStressTest -bench=BenchmarkIntegrationStressTest -timeout 0
         env:
+<<<<<<< HEAD
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+=======
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+>>>>>>> c35f267f29e00b82cdd909f38e49abb852030dab
