@@ -7,11 +7,10 @@ on:
 
 jobs:
   run_bench:
-
     runs-on: ubuntu-latest
 
-    permissions: 
-        contents: read
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -19,25 +18,25 @@ jobs:
       - name: Setup Go 1.24.x
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: "1.24.x"
       - run: go version
 
       - name: Check gh-cli user
         run: gh auth status | grep Logged
         env:
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Download Test Resources
         run: make devr
         env:
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Benchmark Dev Resources Test
         run: go test -run=BenchmarkIntegrationTest -bench=BenchmarkIntegrationTest -timeout 0
         env:
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Benchmark Stress Test
         run: go test -run=BenchmarkIntegrationStressTest -bench=BenchmarkIntegrationStressTest -timeout 0
         env:
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}

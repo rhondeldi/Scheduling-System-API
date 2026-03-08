@@ -5,15 +5,14 @@ on:
     branches:
       - "**"
   pull_request:
-    branches: [ "canary", "main", "development" ]
+    branches: ["canary", "main", "development"]
 
 jobs:
   run_tests:
-
     runs-on: ubuntu-latest
 
-    permissions: 
-        contents: read
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -21,18 +20,18 @@ jobs:
       - name: Setup Go 1.24.x
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: "1.24.x"
       - run: go version
 
       - name: Check gh-cli user
         run: gh auth status | grep Logged
         env:
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Download Test Resources
         run: make devr
         env:
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: View Temporary Data Tree
         run: tree scheduling-system-temporary-data
@@ -97,7 +96,7 @@ jobs:
 
           go clean -testcache && go test -run Test ./Utils -timeout 0
         env:
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
           LOG_MODE: verbose
 
       - name: Run Build
@@ -117,7 +116,7 @@ jobs:
           GIN_MODE: debug
           PROTOCOL: tcp
           NODE_VERSION: lts
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Integration Tests - edit curriculum sections
         run: |
@@ -131,4 +130,4 @@ jobs:
 
         env:
           LOG_MODE: verbose
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
