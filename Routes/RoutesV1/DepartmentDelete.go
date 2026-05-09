@@ -72,7 +72,9 @@ func DeleteDepartment(ctx *gin.Context) {
 		GeneticAlgorithm.IterateSectionsWeekSchedule(university_schedule, all_curriculums, selected_semester, nil, nil,
 			func(indicies GeneticAlgorithm.IterIndices, values GeneticAlgorithm.IterValues) GeneticAlgorithm.IterReturnType {
 				if values.Curriculum.DepartmentID != uint16(department_id) {
-					new_university_schedule = append(new_university_schedule, *values.WeekSched)
+					if values.WeekSched != nil {
+						new_university_schedule = append(new_university_schedule, *values.WeekSched)
+					}
 				}
 
 				return GeneticAlgorithm.IterProceed

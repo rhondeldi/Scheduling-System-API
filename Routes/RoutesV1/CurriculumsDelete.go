@@ -77,7 +77,7 @@ func DeleteCurriculum(ctx *gin.Context) {
 
 		GeneticAlgorithm.IterateSectionsWeekSchedule(university_schedule, all_curriculums, selected_semester, nil, nil,
 			func(indicies GeneticAlgorithm.IterIndices, values GeneticAlgorithm.IterValues) GeneticAlgorithm.IterReturnType {
-				if values.Curriculum.CurriculumID == uint16(curriculum_id) {
+				if values.Curriculum != nil && values.Curriculum.CurriculumID == uint16(curriculum_id) {
 
 					if remove_starting_index == -1 {
 						remove_starting_index = indicies.Usi
@@ -91,6 +91,12 @@ func DeleteCurriculum(ctx *gin.Context) {
 		)
 
 		if remove_chunk_length == 0 {
+			continue
+		}
+
+		// Validate indices are within bounds before attempting removal
+		if remove_starting_index < 0 || remove_starting_index >= len(university_schedule) || (remove_starting_index+remove_chunk_length) > len(university_schedule) {
+			log.Printf("DeleteCurriculum: [skip-semester] curriculum sections are out of bounds for semester %s: start=%d, size=%d, schedule_len=%d. Likely the schedule doesn't have entries for this curriculum yet.", Curriculum.SEMESTER_INDEX_NAME[selected_semester], remove_starting_index, remove_chunk_length, len(university_schedule))
 			continue
 		}
 
