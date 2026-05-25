@@ -23,6 +23,7 @@ go.work.sum
 
 # env file
 .env
+admin_credentials.json
 setup_env_variables.txt
 app
 

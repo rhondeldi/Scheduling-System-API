@@ -151,6 +151,8 @@ func main() {
 	router.DELETE("/auth_gasss_logout", Auth.LogOut)
 	router.GET("/admin_who", Auth.AdminWho)
 	router.GET("/who", Auth.Who)
+	router.GET("/auth_admin_account", Auth.GetAdminAccount)
+	router.PATCH("/auth_admin_account", Auth.PatchAdminCredentials)
 
 	// ============= department routes and handlers =============
 
@@ -158,6 +160,7 @@ func main() {
 	v1.GET("/departments", RoutesV1.GetDepartmentsPaginated)
 	v1.GET("/department_data", RoutesV1.GetCurriculumsDataInDepartment)
 	v1.PATCH("/department_update", RoutesV1.PatchDepartment)
+	v1.PATCH("/department_password_update", RoutesV1.PatchDepartmentPassword)
 	v1.DELETE("/department_remove", RoutesV1.DeleteDepartment)
 
 	// ============= instructor routes and handlers =============

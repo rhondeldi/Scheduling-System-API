@@ -106,6 +106,7 @@ func Login(ctx *gin.Context) {
 
 	if department_logged_in == nil {
 		session.Set("department_user", department_found.DepartmentID)
+		session.Delete("admin_user")
 
 		log.Print("Login: [saving session]")
 		err_save_session := session.Save()

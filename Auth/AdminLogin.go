@@ -1,9 +1,7 @@
 package Auth
 
 import (
-	"crypto/subtle"
 	"net/http"
-	"os"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -22,27 +20,7 @@ func AdminLogin(ctx *gin.Context) {
 		return
 	}
 
-	adminUsername := os.Getenv("ADMIN_USERNAME")
-	if adminUsername == "" {
-		adminUsername = "admin"
-	}
-
-	adminPassword := os.Getenv("ADMIN_PASSWORD")
-	if adminPassword == "" {
-		adminPassword = "admin123"
-	}
-
-	isUsernameMatch := subtle.ConstantTimeCompare(
-		[]byte(adminLoginForm.Username),
-		[]byte(adminUsername),
-	) == 1
-
-	isPasswordMatch := subtle.ConstantTimeCompare(
-		[]byte(adminLoginForm.Password),
-		[]byte(adminPassword),
-	) == 1
-
-	if !isUsernameMatch || !isPasswordMatch {
+	if !isAdminCredentialMatch(adminLoginForm.Username, adminLoginForm.Password) {
 		ctx.String(http.StatusUnauthorized, "invalid admin credentials")
 		return
 	}
