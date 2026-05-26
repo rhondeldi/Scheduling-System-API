@@ -56,7 +56,20 @@ func GetDepartmentRooms(ctx *gin.Context) {
 
 	for _, room := range all_rooms {
 		if room.DepartmentID != uint16(department_id) {
-			continue
+			// allow rooms that are explicitly shared to the selected department
+			// or rooms that are shared to GEN (dept id 0) so GEN-shared rooms
+			// appear when viewing other departments
+			shared := false
+			for _, sd := range room.SharingDepartments {
+				if sd == uint16(department_id) || sd == 0 {
+					shared = true
+					break
+				}
+			}
+
+			if !shared {
+				continue
+			}
 		}
 
 		if len(name_parameter) > 0 {
