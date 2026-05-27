@@ -117,7 +117,13 @@ func main() {
 
 	//////////////////////////////////////////////////////////////////////////
 
-	router := gin.Default()
+	router := gin.New()
+	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipPaths: []string{
+			"/v1/dept_gen_result",
+		},
+	}))
+	router.Use(gin.Recovery())
 
 	// maximum memory limit for multipart form file uploads
 	router.MaxMultipartMemory = 5 << 20 // 5 MiB
@@ -187,6 +193,8 @@ func main() {
 	v1.POST("/subject_add", RoutesV1.PostSubject)
 	v1.PATCH("/subject_update", RoutesV1.PatchSubject)
 	v1.DELETE("/subject_remove", RoutesV1.DeleteSubject)
+	v1.POST("/subjects", RoutesV1.PostSubject)
+	v1.PUT("/subjects/:id", RoutesV1.PutSubject)
 
 	// ============= curriculum routes and handlers =============
 
@@ -217,6 +225,8 @@ func main() {
 	v2.POST("/subject_move", RoutesV2.PostSubjectTimeSlotMove)
 
 	v2.GET("/validate_schedules", RoutesV2.GetValidateSchedules)
+	v2.GET("/async_schedule", RoutesV2.GetAsyncScheduleRecords)
+	v2.GET("/async-schedule", RoutesV2.GetAsyncScheduleRecords)
 
 	if os.Getenv("GIN_MODE") != "release" {
 		v1.GET("/generate_schedule", RoutesV1.RequestGenerateSchedule) // for dev only
