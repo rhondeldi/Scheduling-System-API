@@ -1,0 +1,1 @@
+.context-menu{position:fixed;border:solid thin black;border-radius:.6em;overflow:hidden;width:fit-content;padding:0;box-shadow:.2em .2em .6em #8d8d8dca;z-index:999999}.context-menu-items{font-weight:700;padding:.22em 1em;width:100%;cursor:pointer;background-color:#fff;transition:ease-in-out .2s}.context-menu-items:hover{color:#fff;background-color:#777}

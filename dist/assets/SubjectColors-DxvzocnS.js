@@ -1,0 +1,1 @@
+const d=(e,n)=>{const i=e>=12?"PM":"AM",r=e%12===0?12:e%12,o=String(r).padStart(2,"0"),t=String(n).padStart(2,"0");return`${o}:${t} ${i}`};function u(e,n,i){const r=[];let o=e,t=0;for(let a=0;a<i;a++){const f=d(o,t);let c=o,s=t+n;s>=60&&(c+=Math.floor(s/60),s%=60);const m=d(c,s);r.push(`${f} - ${m}`),t+=n,t>=60&&(o++,t%=60)}return r}export{u as g};
