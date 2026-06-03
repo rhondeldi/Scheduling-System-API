@@ -27,6 +27,7 @@ func (s *MongodbReader) ReadAllInstructors() ([]Instructors.Instructor, error) {
 			FirstName:     instructor_with_time_str.FirstName,
 			MiddleInitial: instructor_with_time_str.MiddleInitial,
 			LastName:      instructor_with_time_str.LastName,
+			DesignatedSubjectIDs: instructor_with_time_str.DesignatedSubjectIDs,
 		}
 
 		instructor.Time.StringParse(instructor_with_time_str.Time)
@@ -62,6 +63,7 @@ func (s *MongodbReader) ReadInstructor(instructor_id uint16) (*Instructors.Instr
 		FirstName:     instructor_with_time_str.FirstName,
 		MiddleInitial: instructor_with_time_str.MiddleInitial,
 		LastName:      instructor_with_time_str.LastName,
+		DesignatedSubjectIDs: instructor_with_time_str.DesignatedSubjectIDs,
 	}
 
 	instructor.Time.StringParse(instructor_with_time_str.Time)
@@ -90,6 +92,7 @@ func (s *MongodbReader) ReadDepartmentInstructors(department_id int) ([]Instruct
 			FirstName:     instructor_with_time_str.FirstName,
 			MiddleInitial: instructor_with_time_str.MiddleInitial,
 			LastName:      instructor_with_time_str.LastName,
+			DesignatedSubjectIDs: instructor_with_time_str.DesignatedSubjectIDs,
 		}
 
 		instructor.Time.StringParse(instructor_with_time_str.Time)

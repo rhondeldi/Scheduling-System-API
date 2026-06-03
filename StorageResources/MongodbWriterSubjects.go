@@ -18,6 +18,8 @@ func (s *MongodbWriter) CreateSubject(new_subject Curriculum.Subject) error {
 		return errors.New("error CreateSubject(): cannot create a new subject with a non-zero ID")
 	}
 
+	new_subject.NormalizeAsyncConfig()
+
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -79,6 +81,8 @@ func (s *MongodbWriter) UpdateSubject(updated_subject Curriculum.Subject) error 
 	if updated_subject.ID == 0 {
 		return errors.New("error UpdateSubject(): parameter argument missing invalid ID")
 	}
+
+	updated_subject.NormalizeAsyncConfig()
 
 	if s.Mongo.Subjects == nil {
 		s.Mongo.Subjects = s.Mongo.Client.Database("gass").Collection("subjects")

@@ -28,7 +28,15 @@ const ROOM_TYPE_LEC uint16 = 0
 const ROOM_TYPE_LAB uint16 = 1
 const ROOM_TYPE_GYM uint16 = 2
 
+// ROOM_ID_ASYNC is a virtual room used for asynchronous classes.
+const ROOM_ID_ASYNC uint16 = 0xFFFF
+const ROOM_NAME_ASYNC = "ASYNC"
+
 var ROOM_TYPE_NAMES [3]string = [3]string{"Lec", "Lab", "Gym"}
+
+func IsAsyncRoomID(roomID uint16) bool {
+	return roomID == ROOM_ID_ASYNC
+}
 
 // set the current number of classes or sections allocated in the room for a specific time slot.
 func (room *Room) SetTimeSlotClassCount(day, time_slot int, class_count uint8) {

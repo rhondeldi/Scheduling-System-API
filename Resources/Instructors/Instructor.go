@@ -1,5 +1,29 @@
 package Instructors
 
+import (
+	"errors"
+	"strings"
+)
+
+// Validate trims the instructor's name fields and ensures the required
+// fields are not empty. It returns an error describing the first problem
+// found, or nil if the instructor is valid.
+func (instructor *Instructor) Validate() error {
+	instructor.FirstName = strings.TrimSpace(instructor.FirstName)
+	instructor.LastName = strings.TrimSpace(instructor.LastName)
+	instructor.MiddleInitial = strings.TrimSpace(instructor.MiddleInitial)
+
+	if instructor.FirstName == "" {
+		return errors.New("instructor first name cannot be empty")
+	}
+
+	if instructor.LastName == "" {
+		return errors.New("instructor last name cannot be empty")
+	}
+
+	return nil
+}
+
 // type that will be use to read and save a single instructor's information from and to the database.
 type Instructor struct {
 	InstructorID  uint16 `json:"InstructorID" bson:"InstructorID"` // this should never be zero, zero means empty, none or nothing.
@@ -7,6 +31,9 @@ type Instructor struct {
 	FirstName     string `json:"FirstName" bson:"FirstName"`
 	MiddleInitial string `json:"MiddleInitial" bson:"MiddleInitial"`
 	LastName      string `json:"LastName" bson:"LastName"`
+
+	// specialization subject IDs this instructor can handle.
+	DesignatedSubjectIDs []uint16 `json:"DesignatedSubjectIDs,omitempty" bson:"DesignatedSubjectIDs,omitempty"`
 
 	// the total number of assigned subjects to teach.
 	AssignedSubjects int
@@ -27,5 +54,6 @@ type InstructorWithTimeString struct {
 	FirstName     string   `json:"FirstName" bson:"FirstName"`
 	MiddleInitial string   `json:"MiddleInitial" bson:"MiddleInitial"`
 	LastName      string   `json:"LastName" bson:"LastName"`
+	DesignatedSubjectIDs []uint16 `json:"DesignatedSubjectIDs,omitempty" bson:"DesignatedSubjectIDs,omitempty"`
 	Time          []string `json:"Time" bson:"Time"`
 }

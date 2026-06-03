@@ -59,6 +59,11 @@ func TestGeneratedScheduleFitness(t *testing.T) {
 		t.Fatal(err_all_curriculums)
 	}
 
+	// Skip test if no curriculums are defined in the test data
+	if len(curriculums) == 0 {
+		t.Skip("No curriculums defined in test data - skipping fitness test")
+	}
+
 	dept_id_to_department := GeneticAlgorithm.GenerateMapDeptIdToDepartment(departments)
 
 	////////////////////////////////////////////////////////////////////////////////////////

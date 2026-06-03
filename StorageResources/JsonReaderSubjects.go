@@ -41,6 +41,8 @@ func json_read_all_subjects() ([]Curriculum.Subject, error) {
 		return nil, err
 	}
 
+	normalizeSubjects(subjects)
+
 	sort.Slice(subjects, func(i, j int) bool {
 		return subjects[i].ID < subjects[j].ID
 	})
@@ -62,6 +64,7 @@ func (s *JsonReader) ReadSubject(subject_id uint16) (*Curriculum.Subject, error)
 
 	for _, subject := range subjects {
 		if subject.ID == subject_id {
+			normalizeSubject(&subject)
 			return &subject, nil
 		}
 	}

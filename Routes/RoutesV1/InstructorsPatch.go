@@ -107,6 +107,12 @@ func PatchInstructor(ctx *gin.Context) {
 		FirstName:     update_instructor_with_time_str.FirstName,
 		MiddleInitial: update_instructor_with_time_str.MiddleInitial,
 		LastName:      update_instructor_with_time_str.LastName,
+		DesignatedSubjectIDs: selected_instructor.DesignatedSubjectIDs,
+	}
+
+	if err := update_instructor.Validate(); err != nil {
+		ctx.String(http.StatusBadRequest, err.Error())
+		return
 	}
 
 	update_instructor.Time.StringParse(update_instructor_with_time_str.Time)

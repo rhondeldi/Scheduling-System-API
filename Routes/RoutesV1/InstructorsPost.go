@@ -38,6 +38,11 @@ func PostInstructor(ctx *gin.Context) {
 		LastName:      add_instructor_with_time_str.LastName,
 	}
 
+	if err := add_instructor.Validate(); err != nil {
+		ctx.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
 	add_instructor.Time.StringParse(add_instructor_with_time_str.Time)
 
 	err := RouteGlobals.ResourcesPersistence.WriterService.CreateInstructor(add_instructor)

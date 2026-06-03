@@ -137,7 +137,8 @@ curriculum_loop:
 
 					var week_time_table *Schedule.WeekTimeTable
 
-					if len(sched) > 0 {
+					// Safely set week_time_table only when `usi` is within bounds.
+					if len(sched) > 0 && usi < len(sched) {
 						week_time_table = &sched[usi]
 					} else {
 						week_time_table = nil
@@ -176,7 +177,9 @@ func ClearDepartmentSchedule(sched Schedule.UniTimeTables, all_curriculums []Cur
 	IterateSectionsWeekSchedule(sched, all_curriculums, selected_semester, nil, nil, func(indecies IterIndices, values IterValues) IterReturnType {
 
 		if values.Curriculum.DepartmentID == department_id {
-			values.Sched[indecies.Usi] = Schedule.WeekTimeTable{}
+			if len(values.Sched) > 0 && indecies.Usi >= 0 && indecies.Usi < len(values.Sched) {
+				values.Sched[indecies.Usi] = Schedule.WeekTimeTable{}
+			}
 		}
 
 		return IterProceed

@@ -39,6 +39,8 @@ func json_read_all_curriculums() ([]Curriculum.Curriculum, error) {
 		return nil, err
 	}
 
+	normalizeCurriculums(curriculums)
+
 	sort.Slice(curriculums, func(i, j int) bool {
 		return curriculums[i].CurriculumID < curriculums[j].CurriculumID
 	})
@@ -60,6 +62,7 @@ func (s *JsonReader) ReadCurriculum(curriculum_id uint16) (*Curriculum.Curriculu
 
 	for _, curriculum := range curriculums {
 		if curriculum.CurriculumID == curriculum_id {
+			normalizeCurriculumSubjects(&curriculum)
 			return &curriculum, nil
 		}
 	}

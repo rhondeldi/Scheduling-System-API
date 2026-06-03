@@ -4,20 +4,20 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	AdminResource "github.com/mrdcvlsc/scheduling-system-backend/Resources/Admin"
+	"github.com/mrdcvlsc/scheduling-system-backend/RouteGlobals"
+	"github.com/mrdcvlsc/scheduling-system-backend/Utils"
 	"golang.org/x/crypto/bcrypt"
 )
 
 const adminCredentialsFile = "admin_credentials.json"
 
-type adminCredentials struct {
-	Username     string `json:"username"`
-	PasswordHash string `json:"passwordHash"`
-	Password     string `json:"password,omitempty"`
-}
+type adminCredentials = AdminResource.AdminCredentials
 
 type AdminPasswordUpdateForm struct {
 	Username        string `json:"username"`
@@ -47,36 +47,120 @@ func defaultAdminCredentials() adminCredentials {
 func readAdminCredentials() adminCredentials {
 	credentials := defaultAdminCredentials()
 
-	data, err := os.ReadFile(adminCredentialsFile)
-	if err != nil {
+	storedCredentials, persistErr := readAdminCredentialsFromPersistence()
+	if persistErr == nil && storedCredentials != nil {
+		credentials = mergeAdminCredentials(credentials, *storedCredentials)
+		credentials, hashed := ensureAdminPasswordHash(credentials)
+		if hashed {
+			_ = writeAdminCredentials(credentials)
+		}
 		return credentials
 	}
 
-	storedCredentials := adminCredentials{}
-	if err := json.Unmarshal(data, &storedCredentials); err != nil {
-		return credentials
+	legacyCredentials, legacyErr := readAdminCredentialsFromFile()
+	if legacyErr == nil && legacyCredentials != nil {
+		credentials = mergeAdminCredentials(credentials, *legacyCredentials)
 	}
 
-	if strings.TrimSpace(storedCredentials.Username) != "" {
-		credentials.Username = strings.TrimSpace(storedCredentials.Username)
-	}
-	if storedCredentials.PasswordHash != "" {
-		credentials.PasswordHash = storedCredentials.PasswordHash
-		credentials.Password = ""
-	} else if storedCredentials.Password != "" {
-		credentials.Password = storedCredentials.Password
+	credentials, hashed := ensureAdminPasswordHash(credentials)
+	if persistErr == nil && (storedCredentials == nil || hashed) {
+		_ = writeAdminCredentials(credentials)
 	}
 
 	return credentials
 }
 
 func writeAdminCredentials(credentials adminCredentials) error {
+	if credentials.PasswordHash != "" {
+		credentials.Password = ""
+	}
+
+	if RouteGlobals.ResourcesPersistence == nil || RouteGlobals.ResourcesPersistence.WriterService == nil {
+		return writeAdminCredentialsFile(credentials)
+	}
+
+	return RouteGlobals.ResourcesPersistence.WriterService.UpsertAdminCredentials(credentials)
+}
+
+func readAdminCredentialsFromPersistence() (*adminCredentials, error) {
+	if RouteGlobals.ResourcesPersistence == nil || RouteGlobals.ResourcesPersistence.ReaderService == nil {
+		return nil, nil
+	}
+
+	return RouteGlobals.ResourcesPersistence.ReaderService.ReadAdminCredentials()
+}
+
+func readAdminCredentialsFromFile() (*adminCredentials, error) {
+	projectRoot, errProjectRoot := Utils.FindProjectRoot()
+	if errProjectRoot != nil {
+		return nil, errProjectRoot
+	}
+
+	credentialsFile := path.Join(projectRoot, adminCredentialsFile)
+	data, err := os.ReadFile(credentialsFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	storedCredentials := adminCredentials{}
+	if err := json.Unmarshal(data, &storedCredentials); err != nil {
+		return nil, err
+	}
+
+	return &storedCredentials, nil
+}
+
+func writeAdminCredentialsFile(credentials adminCredentials) error {
+	projectRoot, errProjectRoot := Utils.FindProjectRoot()
+	if errProjectRoot != nil {
+		return errProjectRoot
+	}
+
+	credentialsFile := path.Join(projectRoot, adminCredentialsFile)
 	data, err := json.MarshalIndent(credentials, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(adminCredentialsFile, data, 0600)
+	return os.WriteFile(credentialsFile, data, 0600)
+}
+
+func mergeAdminCredentials(defaults adminCredentials, stored adminCredentials) adminCredentials {
+	if strings.TrimSpace(stored.Username) != "" {
+		defaults.Username = strings.TrimSpace(stored.Username)
+	}
+
+	if stored.PasswordHash != "" {
+		defaults.PasswordHash = stored.PasswordHash
+		defaults.Password = ""
+	} else if stored.Password != "" {
+		defaults.Password = stored.Password
+	}
+
+	return defaults
+}
+
+func ensureAdminPasswordHash(credentials adminCredentials) (adminCredentials, bool) {
+	if credentials.PasswordHash != "" {
+		credentials.Password = ""
+		return credentials, false
+	}
+
+	if strings.TrimSpace(credentials.Password) == "" {
+		return credentials, false
+	}
+
+	passwordHash, hashErr := bcrypt.GenerateFromPassword([]byte(credentials.Password), bcrypt.DefaultCost)
+	if hashErr != nil {
+		return credentials, false
+	}
+
+	credentials.PasswordHash = string(passwordHash)
+	credentials.Password = ""
+	return credentials, true
 }
 
 func isAdminPasswordMatch(credentials adminCredentials, password string) bool {

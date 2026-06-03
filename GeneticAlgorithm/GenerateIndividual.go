@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"slices"
 	"sort"
 	"time"
@@ -21,6 +22,8 @@ const (
 	TERM_2ND_SEMESTER int = 1 // `selected_semester` option.
 	TERM_MIDYEAR      int = 2 // `selected_semester` option.
 )
+
+const ALLOW_SPECIALIZED_INSTRUCTOR_FALLBACK bool = true
 
 const (
 	DIST_FRONT_COMPRESSED int = 0
@@ -71,13 +74,27 @@ func EncodeIndividualGenome(
 
 	////////////////////////////////////////////////////////////////////////////////////////
 
-	university_schedules := make(Schedule.UniTimeTables, len(rc_university_schedules))
-
-	copied_week_time_table := copy(university_schedules, rc_university_schedules)
-
-	if copied_week_time_table != len(rc_university_schedules) {
-		return nil, nil, fmt.Errorf("error encode individual genome, slice elements copied %d, internal university schedule copy operation failed in generate new individual function", copied_week_time_table)
+	// Helper to count total sections for the selected semester.
+	// Keep this aligned with Curriculum.GetTotalNumberOfSections and
+	// IterateSectionsWeekSchedule (active year levels only, valid semester only).
+	countTotalSections := func(curriculums []Curriculum.Curriculum, selected_semester int) int {
+		total := 0
+		for _, c := range curriculums {
+			for _, yl := range c.YearLevels {
+				if !yl.IsActive {
+					continue
+				}
+				if selected_semester < 0 || selected_semester >= len(yl.Semesters) {
+					continue
+				}
+				total += yl.Semesters[selected_semester].Sections
+			}
+		}
+		return total
 	}
+
+	total_sections := countTotalSections(curriculums, selected_semester)
+	university_schedules := make(Schedule.UniTimeTables, total_sections)
 
 	////////////////////////////////////////////////////////////////////////////////////////
 
@@ -129,6 +146,9 @@ func EncodeIndividualGenome(
 				}
 			}
 
+			if usi < 0 || usi >= len(university_schedules) {
+				log.Fatalf("EncodeIndividualGenome: usi index out of range: usi=%d, len(university_schedules)=%d. This usually means the number of sections in all curriculums for the selected semester exceeds the length of university_schedules. Check allocation logic.", usi, len(university_schedules))
+			}
 			week_time_table := university_schedules[usi]
 
 			/////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -146,6 +166,12 @@ func EncodeIndividualGenome(
 			rng.Shuffle(len(semester.Subjects), func(i, j int) {
 				semester.Subjects[i], semester.Subjects[j] = semester.Subjects[j], semester.Subjects[i]
 			})
+			// larger first
+			sort.Slice(semester.Subjects, func(i, j int) bool {
+				slotsI := semester.Subjects[i].SlotsToAssign()
+				slotsJ := semester.Subjects[j].SlotsToAssign()
+				return slotsI > slotsJ
+			})
 
 			/////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -160,6 +186,7 @@ func EncodeIndividualGenome(
 			subj_assign_fail_possible_reason["not-enough-rooms"] = 0
 
 			for _, subject := range semester.Subjects {
+				isNSTPSubject := isNSTP1Or2Subject(subject)
 
 				non_final_sched_idx := uint16(usi)
 
@@ -174,6 +201,21 @@ func EncodeIndividualGenome(
 				}
 
 				var selected_instructor *Instructors.Instructor
+
+				has_curriculum_designated_instructors := len(subject.DesignatedInstructors) > 0
+				if !has_curriculum_designated_instructors {
+					for _, instructor := range instructors {
+						if slices.Contains(instructor.DesignatedSubjectIDs, subject.ID) {
+							subject.DesignatedInstructors = append(subject.DesignatedInstructors, instructor.InstructorID)
+						}
+					}
+
+					for _, instructor := range encoding_resource.DeptIdToInstructors[0] {
+						if slices.Contains(instructor.DesignatedSubjectIDs, subject.ID) {
+							subject.DesignatedInstructors = append(subject.DesignatedInstructors, instructor.InstructorID)
+						}
+					}
+				}
 
 				/////////////////////////////////////////////////////////////////////////////////////////////////////////
 				//               POPULATE SPECIALIZED INSTRUCTOR LIST FOR THE SUBJECT IF THEY EXIST
@@ -199,16 +241,18 @@ func EncodeIndividualGenome(
 					}
 
 					if len(specialized_instructors) == 0 {
-						is_to_return = true
+						if !ALLOW_SPECIALIZED_INSTRUCTOR_FALLBACK {
+							is_to_return = true
 
-						return_uni_time_table = nil
-						return_encoding_resource = nil
-						return_error = fmt.Errorf(
-							"error encode individual genome, the specialized instructor(s) added in %s, %s, %s, section %s, subject %s, are not found in the department instructors and general instructors list",
-							curriculum.CurriculumCode, year_level.Name, semester.Name, Curriculum.SECTION[section_idx], subject.Code,
-						)
+							return_uni_time_table = nil
+							return_encoding_resource = nil
+							return_error = fmt.Errorf(
+								"error encode individual genome, the specialized instructor(s) added in %s, %s, %s, section %s, subject %s, are not found in the department instructors and general instructors list",
+								curriculum.CurriculumCode, year_level.Name, semester.Name, Curriculum.SECTION[section_idx], subject.Code,
+							)
 
-						return IterBreakCurriculumLoop
+							return IterBreakCurriculumLoop
+						}
 					}
 
 					// shuffle specialized instructors
@@ -220,6 +264,37 @@ func EncodeIndividualGenome(
 					sort.Slice(specialized_instructors, func(i, j int) bool {
 						return specialized_instructors[i].TotalTeachingHours < specialized_instructors[j].TotalTeachingHours
 					})
+
+					if ALLOW_SPECIALIZED_INSTRUCTOR_FALLBACK {
+						specialized_ids := make(map[uint16]bool)
+						for _, instructor := range specialized_instructors {
+							specialized_ids[instructor.InstructorID] = true
+						}
+
+						fallback_instructors := make([]*Instructors.Instructor, 0, len(instructors)+len(encoding_resource.DeptIdToInstructors[0]))
+						for i := range instructors {
+							if specialized_ids[instructors[i].InstructorID] {
+								continue
+							}
+							fallback_instructors = append(fallback_instructors, &instructors[i])
+						}
+						for i := range encoding_resource.DeptIdToInstructors[0] {
+							if specialized_ids[encoding_resource.DeptIdToInstructors[0][i].InstructorID] {
+								continue
+							}
+							fallback_instructors = append(fallback_instructors, &encoding_resource.DeptIdToInstructors[0][i])
+						}
+
+						rng.Shuffle(len(fallback_instructors), func(i, j int) {
+							fallback_instructors[i], fallback_instructors[j] = fallback_instructors[j], fallback_instructors[i]
+						})
+
+						sort.Slice(fallback_instructors, func(i, j int) bool {
+							return fallback_instructors[i].TotalTeachingHours < fallback_instructors[j].TotalTeachingHours
+						})
+
+						specialized_instructors = append(specialized_instructors, fallback_instructors...)
+					}
 				} else {
 					// shuffle instructors
 					rng.Shuffle(len(instructors), func(i, j int) {
@@ -255,7 +330,7 @@ func EncodeIndividualGenome(
 					number_of_target_instructors := 0
 
 					if len(subject.DesignatedInstructors) > 0 {
-						number_of_target_instructors = len(subject.DesignatedInstructors)
+						number_of_target_instructors = len(specialized_instructors)
 						target_instructor = specialized_instructors[target_instructor_idx]
 					} else {
 						number_of_target_instructors = len(instructors)
@@ -290,15 +365,9 @@ func EncodeIndividualGenome(
 
 						var selected_room *Rooms.Room
 
-						var subject_hours int
+						subject_total_time_slots := subject.SlotsToAssignByClassType(class_type)
 
-						if class_type == 0 {
-							subject_hours = int(subject.LecHours)
-						} else {
-							subject_hours = int(subject.LabHours)
-						}
-
-						if subject_hours == 0 {
+						if subject_total_time_slots <= 0 {
 							continue // skip subject class type if there is no contact hours
 						}
 
@@ -313,7 +382,7 @@ func EncodeIndividualGenome(
 							is_prev_initial_block_success = true
 						}
 
-						subject_total_time_slots := subject_hours * Const.N_HOUR_TIME_SLOTS
+						subject_hours := float64(subject_total_time_slots) / float64(Const.N_HOUR_TIME_SLOTS)
 
 						/////////////////////////////////////////////////////////////////////////////////////////////////////////
 						//                                ITERATE THROUGH THE WEEKLY TIME SLOTS
@@ -334,6 +403,11 @@ func EncodeIndividualGenome(
 							} else {
 								time_slot = i / n
 								day = i % n
+							}
+
+							// NSTP 1 and NSTP 2 subjects are constrained to Saturday only.
+							if isNSTPSubject && day != saturdayDayIndex() {
+								continue
 							}
 
 							day_sched := week_time_table.GetDayTimeTable(day)
@@ -367,6 +441,36 @@ func EncodeIndividualGenome(
 							}
 
 							/////////////////////////////////////////////////////////////////////////////////////////////////////////
+							//                    SOFT MINIMUM INTER-SUBJECT GAP STEER (see gap_constraint.go)
+							/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+							// Prefer slots that keep at least the minimum gap from the
+							// neighbouring subjects on this day. This is a soft preference,
+							// never a hard failure: for the FINAL instructor we stop enforcing
+							// it so a dense schedule can always fall back to a gap-less
+							// placement (CHALLENGE 1) — the fitness function still penalises the
+							// resulting gap. The maximum gap is never enforced here (fitness only).
+							if gapShouldApplyToDay(day) && !hasMinimumGapFromPreviousSubject(*day_sched, time_slot, subject_total_time_slots, gapConfig.MinGapSlots) {
+								if target_instructor_idx < number_of_target_instructors-1 {
+									// not the last instructor: keep looking for a gap-respecting
+									// slot, mirroring how slot unavailability is handled above.
+									if i == total_iterations-1 {
+										continue target_instructor_loop
+									}
+									continue
+								}
+
+								// last instructor and no gap-respecting slot remains: place
+								// without gap enforcement so the subject is never dropped.
+								if os.Getenv("LOG_MODE") == "verbose" {
+									log.Printf(
+										"gap constraint: placing subject %s in %s section %s without minimum gap on day %d slot %d (no gap-respecting slot available)",
+										subject.Code, curriculum.CurriculumCode, Curriculum.SECTION[section_idx], day, time_slot,
+									)
+								}
+							}
+
+							/////////////////////////////////////////////////////////////////////////////////////////////////////////
 							//                          FIND AVAILABLE INSTRUCTOR FOR THE TIME SLOT
 							/////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -396,7 +500,7 @@ func EncodeIndividualGenome(
 									return_uni_time_table = university_schedules
 									return_encoding_resource = nil
 									return_error = fmt.Errorf(
-										"error encode individual genome, not enough specialized_instructors (%d) in %s for %s, %s, %s, section %s, after generating schedules for the previous %d other sections",
+										"error encode individual genome, not enough specialized/fallback instructors (%d) in %s for %s, %s, %s, section %s, after generating schedules for the previous %d other sections",
 										len(specialized_instructors), ro_dept_id_to_department[curriculum.DepartmentID].Name,
 										curriculum.CurriculumCode, semester.Name, year_level.Name, Curriculum.SECTION[section_idx], successful_generated_section_schedules,
 									)
@@ -668,6 +772,11 @@ func EncodeIndividualGenome(
 						} else {
 							panic("woah woah woah!, you're not supposed to be here")
 						}
+					}
+
+					// asynchronous hours do not consume slots, but still count toward instructor load.
+					if selected_instructor != nil && subject.EffectiveAsynchronousHours() > 0 {
+						selected_instructor.TotalTeachingHours += float32(subject.EffectiveAsynchronousHours())
 					}
 
 					break

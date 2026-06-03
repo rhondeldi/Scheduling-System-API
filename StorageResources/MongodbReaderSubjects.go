@@ -46,6 +46,7 @@ func (s *MongodbReader) ReadAllSubjects() ([]Curriculum.Subject, error) {
 			panic(err)
 		}
 
+		normalizeSubject(subject)
 		subjects = append(subjects, *subject)
 	}
 
@@ -71,6 +72,8 @@ func (s *MongodbReader) ReadSubject(subject_id uint16) (*Curriculum.Subject, err
 		log.Print(err)
 		return nil, err
 	}
+
+	normalizeSubject(subject)
 
 	return subject, nil
 }

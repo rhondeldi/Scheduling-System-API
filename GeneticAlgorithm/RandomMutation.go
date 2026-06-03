@@ -27,6 +27,7 @@ func ApplyRandomDaySwapTimeSlots(
 	department_id uint16, selected_semester int,
 ) {
 	rng := rand.New(rand.NewSource(time.Now().UnixMilli()))
+	nstpSubjectIDs := buildNSTP1Or2SubjectIDSet(all_curriculums)
 
 	day_swap_attempts := 0
 	day_swap_success := 0
@@ -50,8 +51,14 @@ func ApplyRandomDaySwapTimeSlots(
 
 		IterateSectionsWeekSchedule(sched, all_curriculums, selected_semester, nil, nil, func(indecies IterIndices, values IterValues) IterReturnType {
 			if values.Curriculum.DepartmentID == department_id {
+				section_subject_async_hours := buildSubjectIDToAsyncHoursMapFromSubjects(values.Semester.Subjects)
+				// Avoid moving NSTP 1/2 subjects away from Saturday during day swaps.
+				if (day == saturdayDayIndex() || day_swap == saturdayDayIndex()) &&
+					(weekDayHasNSTP1Or2(values.WeekSched, day, nstpSubjectIDs) || weekDayHasNSTP1Or2(values.WeekSched, day_swap, nstpSubjectIDs)) {
+					return IterProceed
+				}
 
-				mfit := MeasureWeekTimeTableBasicFitness(*values.WeekSched)
+				mfit := MeasureWeekTimeTableBasicFitness(*values.WeekSched, section_subject_async_hours)
 
 				if mfit > float64(MUTATION_FITNESS_GUARD) {
 					return IterProceed
@@ -161,6 +168,7 @@ func ApplyRandomSubjectDaySwap(
 	department_id uint16, selected_semester int,
 ) {
 	rng := rand.New(rand.NewSource(time.Now().UnixMilli()))
+	nstpSubjectIDs := buildNSTP1Or2SubjectIDSet(all_curriculums)
 
 	successful_subject_day_swaps := 0
 	total_tried_day_swaps := 0
@@ -176,8 +184,9 @@ func ApplyRandomSubjectDaySwap(
 		usi := indicies.Usi
 
 		if curriculum.DepartmentID == department_id {
+			section_subject_async_hours := buildSubjectIDToAsyncHoursMapFromSubjects(values.Semester.Subjects)
 
-			mfit := MeasureWeekTimeTableBasicFitness(*values.WeekSched)
+			mfit := MeasureWeekTimeTableBasicFitness(*values.WeekSched, section_subject_async_hours)
 
 			if mfit > float64(MUTATION_FITNESS_GUARD) {
 				return IterProceed
@@ -211,6 +220,11 @@ func ApplyRandomSubjectDaySwap(
 				}
 
 				rand_subject := subjects_json[shuffled_idx]
+
+				if nstpSubjectIDs[rand_subject.SubjectID] {
+					continue
+				}
+
 				day_swap := rng.Intn(Const.N_WEEKLY_SCHOOL_DAYS)
 
 				is_free_time_slot := true
@@ -278,7 +292,8 @@ func ApplyRandomSubjectTimeSlotNudge(
 			return IterProceed
 		}
 
-		mfit := MeasureWeekTimeTableBasicFitness(*values.WeekSched)
+		section_subject_async_hours := buildSubjectIDToAsyncHoursMapFromSubjects(values.Semester.Subjects)
+		mfit := MeasureWeekTimeTableBasicFitness(*values.WeekSched, section_subject_async_hours)
 
 		if mfit > float64(MUTATION_FITNESS_GUARD) {
 			return IterProceed
@@ -436,6 +451,7 @@ func ApplyRandomSubjectTimeSlotAndDayNudge(
 	department_id uint16, selected_semester int,
 ) {
 	rng := rand.New(rand.NewSource(time.Now().UnixMilli()))
+	nstpSubjectIDs := buildNSTP1Or2SubjectIDSet(all_curriculums)
 
 	successful_subject_nudge := 0
 	total_tried_nudge := 0
@@ -451,8 +467,9 @@ func ApplyRandomSubjectTimeSlotAndDayNudge(
 		usi := indicies.Usi
 
 		if curriculum.DepartmentID == department_id {
+			section_subject_async_hours := buildSubjectIDToAsyncHoursMapFromSubjects(values.Semester.Subjects)
 
-			mfit := MeasureWeekTimeTableBasicFitness(*values.WeekSched)
+			mfit := MeasureWeekTimeTableBasicFitness(*values.WeekSched, section_subject_async_hours)
 
 			if mfit > float64(MUTATION_FITNESS_GUARD) {
 				return IterProceed
@@ -490,6 +507,11 @@ func ApplyRandomSubjectTimeSlotAndDayNudge(
 				total_tried_nudge++
 
 				rnd_subject := subjects_json[shuffled_idx]
+
+				if nstpSubjectIDs[rnd_subject.SubjectID] {
+					continue
+				}
+
 				day_swap := rng.Intn(Const.N_WEEKLY_SCHOOL_DAYS)
 				nudge_value := Utils.RandomInRange(-MAX_TIME_SLOT_NUDGE, MAX_TIME_SLOT_NUDGE)
 

@@ -102,6 +102,7 @@ func SetCachedUniversitySchedule(semester int, university_schedule Schedule.UniT
 	defer schedule_cache.rw_mutex.Unlock()
 
 	schedule_cache.semester_schedule[semester] = university_schedule
+	RecentScheduleUpdate.Add(1)
 
 	return nil
 }

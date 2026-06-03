@@ -38,6 +38,7 @@ func (s *JsonWriter) CreateInstructor(new_instructor Instructors.Instructor) err
 		FirstName:     new_instructor.FirstName,
 		MiddleInitial: new_instructor.MiddleInitial,
 		LastName:      new_instructor.LastName,
+		DesignatedSubjectIDs: new_instructor.DesignatedSubjectIDs,
 		Time:          new_instructor.Time.Stringify(),
 	})
 
@@ -86,6 +87,7 @@ func (s *JsonWriter) UpdateInstructor(instructor_to_update Instructors.Instructo
 		FirstName:     instructor_to_update.FirstName,
 		MiddleInitial: instructor_to_update.MiddleInitial,
 		LastName:      instructor_to_update.LastName,
+		DesignatedSubjectIDs: instructor_to_update.DesignatedSubjectIDs,
 		Time:          instructor_to_update.Time.Stringify(),
 	}
 

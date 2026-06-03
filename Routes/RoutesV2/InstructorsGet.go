@@ -153,6 +153,8 @@ func GetInstructorResource(ctx *gin.Context) {
 
 	semesters_time_slots := make([][]string, 0)
 	semesters_sub_assign := make([][]InstructorSubjectAssignmentInfo, 0)
+	semesters_async_assign := make([][]Schedule.AsyncScheduleRecord, 0)
+	semesters_hour_totals := make([]InstructorSemesterHourTotals, 0)
 
 	for semester_idx := range Curriculum.SUPPORTED_SEMESTERS {
 		university_schedules, has_obtained := RoutesV1.ObtainUniversityScheduleNoHorizontalValidation(ctx, semester_idx)
@@ -180,10 +182,30 @@ func GetInstructorResource(ctx *gin.Context) {
 
 		semesters_time_slots = append(semesters_time_slots, instructor_time_allocation.Stringify())
 		semesters_sub_assign = append(semesters_sub_assign, sub_assign)
+
+		async_assign, async_hours, err_async_assign := get_instructor_async_assignments(selected_instructor_base.InstructorID, semester_idx)
+		if err_async_assign != nil {
+			ctx.String(http.StatusInternalServerError, "we are unable to retrieve instructor asynchronous schedule information right now")
+			return
+		}
+		semesters_async_assign = append(semesters_async_assign, async_assign)
+
+		sync_hours := 0.0
+		for _, item := range sub_assign {
+			sync_hours += (float64(item.SubjectTimeSlots) / float64(Const.N_HOUR_TIME_SLOTS))
+		}
+
+		semesters_hour_totals = append(semesters_hour_totals, InstructorSemesterHourTotals{
+			SyncHours:  sync_hours,
+			AsyncHours: async_hours,
+			TotalHours: sync_hours + async_hours,
+		})
 	}
 
 	response_body["semesters_time_slots"] = semesters_time_slots
 	response_body["semesters_sub_assign"] = semesters_sub_assign
+	response_body["semesters_async_assign"] = semesters_async_assign
+	response_body["semesters_hour_totals"] = semesters_hour_totals
 
 	ctx.JSON(http.StatusOK, response_body)
 }
@@ -195,6 +217,12 @@ type InstructorSubjectAssignmentInfo struct {
 	DayIdx           uint8  `json:"DayIdx"`
 	TimeSlotIdx      uint8  `json:"TimeSlotIdx"`
 	SubjectTimeSlots uint8  `json:"SubjectTimeSlots"`
+}
+
+type InstructorSemesterHourTotals struct {
+	SyncHours  float64 `json:"SyncHours"`
+	AsyncHours float64 `json:"AsyncHours"`
+	TotalHours float64 `json:"TotalHours"`
 }
 
 func get_instructor_time_allocation(base_instructor Instructors.Instructor, university_schedules Schedule.UniTimeTables, all_curriculums []Curriculum.Curriculum, selected_semester int) (Instructors.InstructorTimeSlotBitMap, []InstructorSubjectAssignmentInfo, error) {
@@ -293,6 +321,41 @@ func get_instructor_time_allocation(base_instructor Instructors.Instructor, univ
 	})
 
 	return base_instructor.Time, sub_assign_info, nil
+}
+
+func get_instructor_async_assignments(instructor_id uint16, semester int) ([]Schedule.AsyncScheduleRecord, float64, error) {
+	departments, err_read_departments := RouteGlobals.ResourcesPersistence.ReaderService.ReadAllDepartments()
+	if err_read_departments != nil {
+		return nil, 0, err_read_departments
+	}
+
+	all_curriculums, err_read_all_curriculums := RouteGlobals.ResourcesPersistence.ReaderService.ReadAllCurriculum()
+	if err_read_all_curriculums != nil {
+		return nil, 0, err_read_all_curriculums
+	}
+
+	filtered_records := make([]Schedule.AsyncScheduleRecord, 0)
+	total_async_hours := 0.0
+
+	for _, department := range departments {
+		records, err_read_records := RouteGlobals.ResourcesPersistence.ReaderService.ReadAsyncScheduleRecords(department.DepartmentID, semester)
+		if err_read_records != nil {
+			return nil, 0, err_read_records
+		}
+
+		records = RoutesV1.BackfillAsyncRecordCourseSection(records, all_curriculums)
+
+		for _, record := range records {
+			if record.InstructorID != instructor_id {
+				continue
+			}
+
+			filtered_records = append(filtered_records, record)
+			total_async_hours += record.AsyncHours
+		}
+	}
+
+	return filtered_records, total_async_hours, nil
 }
 
 /*

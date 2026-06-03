@@ -172,7 +172,7 @@ func EstimateResourceAvailability(persistence *StorageResources.Persistence, sel
 
 		total_room_time_slot := int(room.Capacity) * Const.N_WEEKLY_SCHOOL_DAYS * Const.N_DAILY_TIME_SLOTS
 
-		if is_general_room {
+		if is_general_room && len(departments) > 1 {
 			total_room_time_slot = total_room_time_slot / (len(departments) - 1)
 		}
 
@@ -212,7 +212,7 @@ func EstimateResourceAvailability(persistence *StorageResources.Persistence, sel
 			}
 		}
 
-		if is_general_instructor {
+		if is_general_instructor && len(departments) > 1 {
 			total_instructor_time_slots += current_instructor_time_slots / (len(departments) - 1)
 		} else {
 			total_instructor_time_slots += current_instructor_time_slots
@@ -229,11 +229,14 @@ func EstimateResourceAvailability(persistence *StorageResources.Persistence, sel
 		}
 
 		for _, subject := range values.Semester.Subjects {
+			lecSlotsPerSection := subject.SlotsToAssignByClassType(0)
+			labSlotsPerSection := subject.SlotsToAssignByClassType(1)
+
 			if subject.IsGymType() {
-				total_sub_gym_time_slots += (int(subject.LabHours+subject.LecHours) * Const.N_HOUR_TIME_SLOTS * values.Semester.Sections)
+				total_sub_gym_time_slots += ((lecSlotsPerSection + labSlotsPerSection) * values.Semester.Sections)
 			} else {
-				total_sub_lec_time_slots += (int(subject.LecHours) * Const.N_HOUR_TIME_SLOTS * values.Semester.Sections)
-				total_sub_lab_time_slots += (int(subject.LabHours) * Const.N_HOUR_TIME_SLOTS * values.Semester.Sections)
+				total_sub_lec_time_slots += (lecSlotsPerSection * values.Semester.Sections)
+				total_sub_lab_time_slots += (labSlotsPerSection * values.Semester.Sections)
 			}
 		}
 

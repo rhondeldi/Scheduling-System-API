@@ -114,6 +114,17 @@ func DeleteClearDepartmentSchedule(ctx *gin.Context) {
 		return
 	}
 
+	if err_regen_async := RegenerateDepartmentAsyncScheduleRecords(
+		university_schedules,
+		all_curriculums,
+		uint16(department_id),
+		semester,
+	); err_regen_async != nil {
+		log.Print("DeleteClearDepartmentSchedule: [async-records-failed] ", err_regen_async.Error())
+		ctx.String(http.StatusInternalServerError, "department schedules were cleared but async schedule records could not be refreshed")
+		return
+	}
+
 	RouteGlobals.SetDeptSchedGenResult(
 		RouteGlobals.DeptSchedGenKey{
 			DepartmentID: uint16(department_id),
@@ -150,6 +161,13 @@ func DeleteAllUniversitySchedules(ctx *gin.Context) {
 
 	RouteGlobals.ClearCachedUniversitySchedule()
 
+	departments, err_read_departments := RouteGlobals.ResourcesPersistence.ReaderService.ReadAllDepartments()
+	if err_read_departments != nil {
+		log.Print("DeleteAllUniversitySchedules: (read departments error) ", err_read_departments.Error())
+		ctx.String(http.StatusInternalServerError, "unable to clear async schedule records right now")
+		return
+	}
+
 	for semester := range Curriculum.SUPPORTED_SEMESTERS {
 
 		// delete schedule
@@ -160,6 +178,14 @@ func DeleteAllUniversitySchedules(ctx *gin.Context) {
 			log.Print("DeleteClearClassSchedule: (save error) ", err_delete_schedules.Error())
 			ctx.String(http.StatusOK, "we're unable to clear the department schedules")
 			return
+		}
+
+		for _, department := range departments {
+			if err_delete_async := RouteGlobals.ResourcesPersistence.WriterService.DeleteAsyncScheduleRecords(department.DepartmentID, semester); err_delete_async != nil {
+				log.Print("DeleteAllUniversitySchedules: (delete async records error) ", err_delete_async.Error())
+				ctx.String(http.StatusInternalServerError, "unable to clear async schedule records")
+				return
+			}
 		}
 	}
 

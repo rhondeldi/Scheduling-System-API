@@ -3,10 +3,12 @@ package StorageResources
 import (
 	"sync"
 
+	AdminResource "github.com/mrdcvlsc/scheduling-system-backend/Resources/Admin"
 	"github.com/mrdcvlsc/scheduling-system-backend/Resources/Curriculum"
 	"github.com/mrdcvlsc/scheduling-system-backend/Resources/Departments"
 	"github.com/mrdcvlsc/scheduling-system-backend/Resources/Instructors"
 	"github.com/mrdcvlsc/scheduling-system-backend/Resources/Rooms"
+	"github.com/mrdcvlsc/scheduling-system-backend/Schedule"
 )
 
 var SubjectMutex sync.Mutex
@@ -14,8 +16,11 @@ var CurriculumsMutex sync.Mutex
 var DepartmentMutex sync.Mutex
 var InstructorMutex sync.Mutex
 var RoomMutex sync.Mutex
+var AsyncScheduleMutex sync.Mutex
 
 type readerRepository interface {
+	ReadAdminCredentials() (*AdminResource.AdminCredentials, error)
+
 	// the order of curriculums returned by this method is always sorted by curriculum ID.
 	ReadAllCurriculum() ([]Curriculum.Curriculum, error)
 	ReadCurriculum(curriculum_id uint16) (*Curriculum.Curriculum, error)
@@ -32,9 +37,13 @@ type readerRepository interface {
 
 	ReadAllRooms() ([]Rooms.Room, error)
 	ReadRoom(room_id uint16) (*Rooms.Room, error)
+
+	ReadAsyncScheduleRecords(department_id uint16, semester int) ([]Schedule.AsyncScheduleRecord, error)
 }
 
 type writerRepository interface {
+	UpsertAdminCredentials(credentials AdminResource.AdminCredentials) error
+
 	CreateDepartment(new_department Departments.Department) error
 	UpdateDepartment(department_to_update Departments.Department) error
 	DeleteDepartment(department_id uint16) error
@@ -54,6 +63,9 @@ type writerRepository interface {
 	CreateRoom(new_room Rooms.Room) error
 	UpdateRoom(room_to_update Rooms.Room) error
 	DeleteRoom(room_id uint16) error
+
+	ReplaceAsyncScheduleRecords(department_id uint16, semester int, records []Schedule.AsyncScheduleRecord) error
+	DeleteAsyncScheduleRecords(department_id uint16, semester int) error
 }
 
 type Persistence struct {

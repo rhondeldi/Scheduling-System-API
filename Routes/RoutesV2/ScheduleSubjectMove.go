@@ -168,5 +168,20 @@ func PostSubjectTimeSlotMove(ctx *gin.Context) {
 		return
 	}
 
+	if err := RouteGlobals.SetCachedUniversitySchedule(selected_semester, university_schedules); err != nil {
+		log.Print("PostSubjectTimeSlotMove: [cache-failed] unable to update schedule cache:", err.Error())
+	}
+
+	if err := RoutesV1.RegenerateDepartmentAsyncScheduleRecords(
+		university_schedules,
+		all_curriculums,
+		uint16(department_id),
+		selected_semester,
+	); err != nil {
+		log.Print("PostSubjectTimeSlotMove: [async-records-failed] unable to refresh async records:", err.Error())
+		ctx.String(http.StatusInternalServerError, "schedule updated but async schedule records could not be refreshed")
+		return
+	}
+
 	ctx.String(http.StatusOK, "subject move success")
 }

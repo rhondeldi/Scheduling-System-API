@@ -267,10 +267,6 @@ func HorizontalValidation(
 
 						return IterBreakCurriculumLoop
 					}
-					continue
-				}
-
-				if subject_id == 0 {
 					if university_sched[usi][day][time_slot].GetRoomID() > 0 {
 						errs_slice = append(
 							errs_slice,
@@ -322,6 +318,31 @@ func HorizontalValidation(
 			}
 		}
 
+		// ── EMPTY-SECTION GUARD ────────────────────────────────────────────────
+		//
+		// A section that has no placed subjects AND no stray subjects is treated
+		// as a deliberate skip — typically because GA_SKIP_CURRICULA marked the
+		// curriculum as unschedulable, or because it belongs to another program
+		// in the same department whose data is over-capacity (e.g. BSPsych
+		// within DAS when 38 lab-room time slots are short).
+		//
+		// Without this guard, HorizontalValidation reports every curriculum
+		// subject as "missing" on every empty section, which causes the GA's
+		// mutation phase to revert EVERY individual EVERY generation: the
+		// repaired schedule re-encodes BSPsych as empty (correct), HV reports
+		// 7 missing subjects per BSPsych section (wrong), the GA reverts the
+		// mutation, and progress halts.  The dangling-id checks above still
+		// run, so we never let a half-cleared section sneak through — only
+		// genuinely empty ones pass.
+		//
+		// The guard is the third piece of the three-part skip chain:
+		//   1. RunGeneticAlgorithm writes IsSchedIdxToSubIdToSkip (3 sites)
+		//   2. EncodeIndividualGenome leaves those subjects unplaced
+		//   3. HorizontalValidation tolerates the resulting empty section ← here
+		if len(subject_id_to_time_slot_count) == 0 && len(stray_subject_ids) == 0 {
+			return IterProceed
+		}
+
 		if len(semester.Subjects) != len(subject_id_to_time_slot_count) {
 			errs_slice = append(errs_slice, fmt.Errorf(
 				"detected %d missing subject(s) in %s, %s, %s, section %s (usi:%d)",
@@ -336,24 +357,25 @@ func HorizontalValidation(
 
 		for _, subject := range semester.Subjects {
 			_, has_subject_id := subject_id_to_time_slot_count[subject.ID]
+			expected_slots := uint8(subject.SlotsToAssign())
 
 			if !has_subject_id {
 				errs_slice = append(errs_slice, fmt.Errorf(
 					"the subject %s was not assigned to %s, %s, %s, section %s (usi:%d)",
 					subject.Code, curriculum.CurriculumCode, year_level.Name, semester.Name, Curriculum.SECTION[section_idx], usi,
 				))
-			} else if ((subject.LecHours + subject.LabHours) * Const.N_HOUR_TIME_SLOTS) > uint8(subject_id_to_time_slot_count[subject.ID]) {
+			} else if expected_slots > uint8(subject_id_to_time_slot_count[subject.ID]) {
 				errs_slice = append(errs_slice, fmt.Errorf(
 					"the subject %s has missing time slot allocations, expecting %d, but only found %d in %s, %s, %s, section %s (usi:%d)",
 					subject.Code,
-					((subject.LecHours+subject.LabHours)*Const.N_HOUR_TIME_SLOTS), uint8(subject_id_to_time_slot_count[subject.ID]),
+					expected_slots, uint8(subject_id_to_time_slot_count[subject.ID]),
 					curriculum.CurriculumCode, year_level.Name, semester.Name, Curriculum.SECTION[section_idx], usi,
 				))
-			} else if ((subject.LecHours + subject.LabHours) * Const.N_HOUR_TIME_SLOTS) < uint8(subject_id_to_time_slot_count[subject.ID]) {
+			} else if expected_slots < uint8(subject_id_to_time_slot_count[subject.ID]) {
 				errs_slice = append(errs_slice, fmt.Errorf(
 					"the subject %s has extra time slot allocations, expecting only %d, but found %d in %s, %s, %s, section %s (usi:%d)",
 					subject.Code,
-					((subject.LecHours+subject.LabHours)*Const.N_HOUR_TIME_SLOTS), uint8(subject_id_to_time_slot_count[subject.ID]),
+					expected_slots, uint8(subject_id_to_time_slot_count[subject.ID]),
 					curriculum.CurriculumCode, year_level.Name, semester.Name, Curriculum.SECTION[section_idx], usi,
 				))
 			}
@@ -370,8 +392,91 @@ func HorizontalValidation(
 			))
 		}
 
+		// ── SOFT inter-subject gap check (see gap_constraint.go) ───────────────
+		//
+		// The 1-2 hour gap between subjects is a soft preference, not a hard
+		// requirement like room conflicts or missing subjects. Violations are
+		// only logged here as a warning and are deliberately NOT appended to
+		// errs_slice, so they never cause RunGeneticAlgorithm to return an
+		// error. The fitness function is what nudges the GA toward better-gapped
+		// schedules over generations.
+		if gapConfig.Enabled {
+			gap_violations := CountGapViolations(
+				university_sched[usi], gapConfig.MinGapSlots, gapConfig.MaxGapSlots,
+			)
+			if gap_violations > 0 {
+				log.Printf(
+					"gap constraint: %s %s %s section %s (usi:%d) has %d gap violation(s)",
+					curriculum.CurriculumCode, year_level.Name, semester.Name,
+					Curriculum.SECTION[section_idx], usi, gap_violations,
+				)
+			}
+		}
+
 		return IterProceed
 	})
 
 	return errs_slice
+}
+
+// ValidateNoUnexpectedEmptySections errors when a target department has a fully
+// empty section, unless that section was explicitly marked as allowable to skip.
+func ValidateNoUnexpectedEmptySections(
+	university_sched Schedule.UniTimeTables,
+	curriculums []Curriculum.Curriculum,
+	department_to_validate map[uint16]bool,
+	selected_semester int,
+	allowed_empty map[uint16]map[uint16]bool,
+) error {
+	var validationErr error
+
+	isAllowedEmpty := func(usi int) bool {
+		if allowed_empty == nil {
+			return false
+		}
+		_, ok := allowed_empty[uint16(usi)]
+		return ok
+	}
+
+	IterateSectionsWeekSchedule(university_sched, curriculums, selected_semester, nil, nil,
+		func(indicies IterIndices, values IterValues) IterReturnType {
+			if values.WeekSched == nil || values.Curriculum == nil || values.Semester == nil || values.YearLevel == nil {
+				return IterProceed
+			}
+			if department_to_validate != nil {
+				if !department_to_validate[values.Curriculum.DepartmentID] {
+					return IterProceed
+				}
+			}
+
+			hasSubject := false
+			for day := 0; day < Const.N_WEEKLY_SCHOOL_DAYS; day++ {
+				for time_slot := 0; time_slot < Const.N_DAILY_TIME_SLOTS; time_slot++ {
+					if values.WeekSched[day][time_slot].GetSubjectID() != 0 {
+						hasSubject = true
+						break
+					}
+				}
+				if hasSubject {
+					break
+				}
+			}
+
+			if !hasSubject && !isAllowedEmpty(indicies.Usi) {
+				validationErr = fmt.Errorf(
+					"unexpected empty section detected in %s %s %s section %s (usi:%d)",
+					values.Curriculum.CurriculumCode,
+					values.Semester.Name,
+					values.YearLevel.Name,
+					Curriculum.SECTION[indicies.Section],
+					indicies.Usi,
+				)
+				return IterBreakCurriculumLoop
+			}
+
+			return IterProceed
+		},
+	)
+
+	return validationErr
 }

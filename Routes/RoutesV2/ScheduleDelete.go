@@ -142,5 +142,16 @@ curriculum_loop:
 		return
 	}
 
+	if err_regen_async := RoutesV1.RegenerateDepartmentAsyncScheduleRecords(
+		university_schedules,
+		all_curriculums,
+		uint16(department_id),
+		selected_semester,
+	); err_regen_async != nil {
+		log.Print("DeleteClearClassSchedule: (async records error) ", err_regen_async.Error())
+		ctx.String(http.StatusInternalServerError, "weekly schedule was cleared but async schedule records could not be refreshed")
+		return
+	}
+
 	ctx.String(http.StatusOK, "weekly time table schedule was successfully cleared")
 }

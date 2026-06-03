@@ -52,10 +52,6 @@ func GetDepartSchedGenResult(key DeptSchedGenKey) SchedGenResult {
 	rw_map_mutex.RLock()
 	defer rw_map_mutex.RUnlock()
 
-	if department_id_to_sched_gen_last_result == nil {
-		department_id_to_sched_gen_last_result = make(map[DeptSchedGenKey]SchedGenResult)
-	}
-
 	departments, err_read_departments := ResourcesPersistence.ReaderService.ReadAllDepartments()
 
 	if err_read_departments != nil {
@@ -104,8 +100,8 @@ func InitDeptSchedGenQueue() {
 //
 // return false if the department was already in the schedule generation task queue.
 func PushNewDeptToDeptSchedGenQueue(department_id_and_semester DeptSchedGenKey) bool {
-	rw_queue_mutex.RLock()
-	defer rw_queue_mutex.RUnlock()
+	rw_queue_mutex.Lock()
+	defer rw_queue_mutex.Unlock()
 
 	if slices.Contains(departments_schedule_generation_queue, department_id_and_semester) {
 		return false

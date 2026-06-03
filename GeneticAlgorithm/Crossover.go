@@ -21,6 +21,79 @@ import (
 
 const CROSSOVER_DOMINANT_GENE int = 75 // % - percentage to be likely that the dominant parent's gene will be use during crossover
 
+// isExtendedPairAt returns true iff subjects[idx] and subjects[idx+1] form a
+// split-class pair (same SubjectID and same InstructorID).  Using this helper
+// makes the pair-detection logic consistent between the outer loop and the
+// inner inherit_trait_from_a_parent call.
+func isExtendedPairAt(subjects []Schedule.TimeSlotSubjectJSON, idx int) bool {
+	if idx+1 >= len(subjects) {
+		return false
+	}
+	return subjects[idx+1].SubjectID == subjects[idx].SubjectID &&
+		subjects[idx+1].InstructorID == subjects[idx].InstructorID
+}
+
+// sectionIsIdenticalInBothParents returns true when parent1 and parent2 have
+// placed every subject in this section at exactly the same day, starting slot,
+// instructor and room.  Such a section comes from the stable stored schedule
+// (e.g. BSPsych when the current run is generating DAS) and must not be
+// re-encoded — doing so would book instructors/rooms needed by the current
+// program and then leave the section partially filled, causing every crossover
+// attempt to fail HorizontalValidation.
+// Pre-condition: both slices must already be sorted by (SubjectID, TimeSlotSize),
+// which is guaranteed by the sort calls earlier in the crossover callback.
+func sectionIsIdenticalInBothParents(a, b []Schedule.TimeSlotSubjectJSON) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Day != b[i].Day ||
+			a[i].StartingTimeSlot != b[i].StartingTimeSlot ||
+			a[i].InstructorID != b[i].InstructorID ||
+			a[i].RoomID != b[i].RoomID {
+			return false
+		}
+	}
+	return true
+}
+
+// cloneParentAsOffspring is the crossover's safety net.  It returns a
+// SchedAndResources that is a fresh copy of `parent` with a freshly-built
+// encoding resource.  Use it whenever crossover repair fails — most often
+// because EncodeIndividualGenome cannot satisfy resource constraints
+// (insufficient lab rooms, gym rooms, or instructors).
+//
+// Why cloning is correct:
+//   - The parent came out of genesis, so we already know it is a fully valid
+//     individual: it passed VerticalValidation, HorizontalValidation, and
+//     ValidateEncodingResource at creation.
+//   - Returning a clone keeps the GA progressing instead of burning all 384
+//     crossover retries on the same unsolvable resource shortage.  Subsequent
+//     mutations and selection will still drive evolution.
+//   - The resource is regenerated from the cloned schedule, so it is
+//     consistent with whatever the clone contains.
+//
+// The user pays a small diversity cost: an offspring that would have been a
+// genuine recombination becomes a parent copy.  That is preferable to the
+// alternative — the entire GA aborting at generation 0.
+func cloneParentAsOffspring(
+	parent Schedule.UniTimeTables,
+	default_encoding_resource *EncodingResource,
+	curriculums []Curriculum.Curriculum,
+	selected_semester int,
+) (*SchedAndResources, error) {
+	cloned := make(Schedule.UniTimeTables, len(parent))
+	copy(cloned, parent)
+
+	fresh, err := GenerateEncodingResourceFromUniTimeTable(
+		cloned, curriculums, selected_semester, default_encoding_resource,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("crossover fallback clone failed to build encoding resource: %w", err)
+	}
+	return &SchedAndResources{UniSched: cloned, Resources: fresh}, nil
+}
+
 func Crossover(
 	parent1, parent2 Schedule.UniTimeTables, default_encoding_resource *EncodingResource,
 	curriculums []Curriculum.Curriculum, rooms []Rooms.Room, selected_semester int,
@@ -28,6 +101,8 @@ func Crossover(
 	department_to_encode map[uint16]bool,
 	instructor_id_to_instructor map[uint16]*Instructors.Instructor,
 	resource_persistence *StorageResources.Persistence,
+	ann_client *ANNClient,
+	ann_stats *ANNFitnessEvalStats,
 ) (*SchedAndResources, error) {
 	rng := rand.New(rand.NewSource(time.Now().UnixMilli()))
 
@@ -47,6 +122,9 @@ func Crossover(
 	successful_base_parent_encoded := 0
 	successful_fallback_parent_encoded := 0
 	failed_parents_encoding := 0
+	annSplitReady := false
+	annSplitValid := false
+	annSplitRatio := 0.5
 
 	offspring := make(Schedule.UniTimeTables, len(parent1))
 
@@ -168,6 +246,105 @@ func Crossover(
 			}
 		}
 
+		// ── Frozen-section detection ────────────────────────────────────────────────
+		// If both parents have the exact same placement for every subject in this
+		// section, the section comes from the stable stored schedule of another
+		// program in the same department (e.g. BSPsych when generating DAS).
+		// Attempting to re-encode it after ClearDepartmentSchedule always fails:
+		// the instructors/rooms it needs are already booked by the current program.
+		//
+		// Fix: mark all of its curriculum subjects in IsSchedIdxToSubIdToSkip so
+		// that EncodeIndividualGenome repair ignores this section entirely.  The
+		// section stays empty in the offspring, and HorizontalValidation's
+		// empty-section guard skips it cleanly.
+		if sectionIsIdenticalInBothParents(parent_1_subjects, parent_2_subjects) {
+			if _, exists := offspring_encode_resource.IsSchedIdxToSubIdToSkip[uint16(indicies.Usi)]; !exists {
+				offspring_encode_resource.IsSchedIdxToSubIdToSkip[uint16(indicies.Usi)] = make(map[uint16]bool)
+			}
+			for _, subj := range values.Semester.Subjects {
+				offspring_encode_resource.IsSchedIdxToSubIdToSkip[uint16(indicies.Usi)][subj.ID] = true
+			}
+			return IterProceed // leave empty; repair skips it; HV empty-section guard handles it
+		}
+		// ─────────────────────────────────────────────────────────────────────────
+
+		var dominant_parent_subjects []Schedule.TimeSlotSubjectJSON
+		var recessive_parent_subjects []Schedule.TimeSlotSubjectJSON
+
+		section_subject_async_hours := buildSubjectIDToAsyncHoursMapFromSubjects(values.Semester.Subjects)
+
+		parent1_week_sched_fitness := MeasureWeekTimeTableBasicFitness(parent1[indicies.Usi], section_subject_async_hours)
+		parent2_week_sched_fitness := MeasureWeekTimeTableBasicFitness(parent2[indicies.Usi], section_subject_async_hours)
+
+		if parent1_week_sched_fitness > parent2_week_sched_fitness {
+			dominant_parent_subjects = parent_1_subjects
+			recessive_parent_subjects = parent_2_subjects
+		} else {
+			dominant_parent_subjects = parent_2_subjects
+			recessive_parent_subjects = parent_1_subjects
+		}
+
+		// ANN-guided split is fetched once per crossover operation and reused
+		// across sections to keep API overhead bounded.
+		if ann_client != nil && !annSplitReady {
+			if ann_stats != nil {
+				ann_stats.CrossoverRequestCount++
+			}
+
+			parent1Payload := weekTimeTableToANNPayload(&parent1[indicies.Usi])
+			parent2Payload := weekTimeTableToANNPayload(&parent2[indicies.Usi])
+
+			resp, err := ann_client.RecommendCrossover(
+				parent1Payload,
+				parent2Payload,
+				parent1_week_sched_fitness,
+				parent2_week_sched_fitness,
+			)
+
+			if err == nil && resp != nil && len(resp.RecommendedPoints) > 0 {
+				point := resp.RecommendedPoints[0]
+				if point < 0 {
+					point = 0
+				}
+				maxPoint := (Const.N_WEEKLY_SCHOOL_DAYS * Const.N_DAILY_TIME_SLOTS) - 1
+				if point > maxPoint {
+					point = maxPoint
+				}
+				annSplitRatio = float64(point) / float64(maxPoint)
+				annSplitValid = true
+			} else {
+				if ann_stats != nil {
+					ann_stats.CrossoverFailureCount++
+				}
+				if os.Getenv("LOG_MODE") == "verbose" && err != nil {
+					log.Printf("Crossover [ANN fallback]: %s", err.Error())
+				}
+			}
+			annSplitReady = true
+		}
+
+		// FIX 3: clamp splitIndex so it always produces actual mixing.
+		// With splitIndex=0 the dominant parent contributes only one subject
+		// (all others recessive) and with splitIndex=len-1 ALL subjects come from
+		// the dominant parent — no recessive contribution at all.  Both extremes
+		// defeat the purpose of crossover, so we clamp to [1, len-2] when the
+		// subject list is large enough to allow it.
+		useAnnSplit := annSplitValid && len(parent_1_subjects) > 2
+		splitIndex := 0
+		if useAnnSplit {
+			rawIdx := int(annSplitRatio * float64(len(dominant_parent_subjects)-1))
+			// Clamp to [1, len-2] so both parents always contribute at least 1 subject.
+			minSplit := 1
+			maxSplit := len(dominant_parent_subjects) - 2
+			if rawIdx < minSplit {
+				rawIdx = minSplit
+			}
+			if rawIdx > maxSplit {
+				rawIdx = maxSplit
+			}
+			splitIndex = rawIdx
+		}
+
 		for i := 0; i < len(parent_1_subjects); i++ {
 
 			is_equal_subject_id := (parent_1_subjects[i].SubjectID == parent_2_subjects[i].SubjectID)
@@ -214,21 +391,15 @@ func Crossover(
 			var base_parent_subjects []Schedule.TimeSlotSubjectJSON
 			var fallback_parent_subjects []Schedule.TimeSlotSubjectJSON
 
-			var dominant_parent_subjects []Schedule.TimeSlotSubjectJSON
-			var recessive_parent_subjects []Schedule.TimeSlotSubjectJSON
-
-			parent1_week_sched_fitness := MeasureWeekTimeTableBasicFitness(parent1[indicies.Usi])
-			parent2_week_sched_fitness := MeasureWeekTimeTableBasicFitness(parent2[indicies.Usi])
-
-			if parent1_week_sched_fitness > parent2_week_sched_fitness {
-				dominant_parent_subjects = parent_1_subjects
-				recessive_parent_subjects = parent_2_subjects
-			} else {
-				dominant_parent_subjects = parent_2_subjects
-				recessive_parent_subjects = parent_1_subjects
-			}
-
-			if rng.Int31n(100) <= int32(CROSSOVER_DOMINANT_GENE) {
+			if useAnnSplit {
+				if i <= splitIndex {
+					base_parent_subjects = dominant_parent_subjects
+					fallback_parent_subjects = recessive_parent_subjects
+				} else {
+					base_parent_subjects = recessive_parent_subjects
+					fallback_parent_subjects = dominant_parent_subjects
+				}
+			} else if rng.Int31n(100) <= int32(CROSSOVER_DOMINANT_GENE) {
 				base_parent_subjects = dominant_parent_subjects
 				fallback_parent_subjects = recessive_parent_subjects
 			} else {
@@ -265,17 +436,24 @@ func Crossover(
 				offspring, offspring_encode_resource,
 				fallback_parent_subjects,
 			)
-
-			if fallback_parent_result.has_extended_subject {
-				i++
-			}
-
 			if fallback_parent_result.success {
+				if fallback_parent_result.has_extended_subject {
+					i++
+				}
+
 				successful_fallback_parent_encoded++
 				continue // to next subject
 			}
 
-			// if both parents failed to encode, we will just try to re-encode to repair it later
+			// Both parents failed — defer to EncodeIndividualGenome repair.
+			// Do NOT skip i+1 even if it is the extended partner of i.
+			// HorizontalValidation counts total hours per subject, not slot adjacency,
+			// so allowing i+1 to be inherited from a parent as a standalone on the
+			// next iteration is safe: both halves end up placed and the hour count
+			// is satisfied.  Skipping i+1 forces the PAIR into repair, which
+			// consistently fails on tightly-packed parent schedules because repair
+			// cannot find two free consecutive slots — causing all 384 crossover
+			// attempts to exhaust and the GA to abort.
 			failed_parents_encoding++
 		}
 
@@ -303,13 +481,51 @@ func Crossover(
 		)
 
 		if err_repair_encoding != nil {
-			return nil, fmt.Errorf("crossover completion error, caused by : %s", err_repair_encoding.Error())
+			// EncodeIndividualGenome could not satisfy a hard resource constraint
+			// (e.g. "not enough Lab rooms").  Without a fallback, all 384 crossover
+			// retries hit the same wall and the GA aborts at generation 0.  Clone
+			// parent1 instead — it is known-valid (it survived genesis).
+			log.Printf(
+				"Crossover: repair failed (%s) — falling back to parent1 clone",
+				err_repair_encoding.Error(),
+			)
+			return cloneParentAsOffspring(parent1, default_encoding_resource, curriculums, selected_semester)
+		}
+
+		if err := ValidateEncodingResource(repaired_sched, repaired_encoding_resource, curriculums, selected_semester); err != nil {
+			log.Printf(
+				"Crossover: repaired encoding resource invalid (%s) — falling back to parent1 clone",
+				err.Error(),
+			)
+			return cloneParentAsOffspring(parent1, default_encoding_resource, curriculums, selected_semester)
+		}
+
+		if errs := repaired_sched.VerticalValidation(rooms); len(errs) > 0 {
+			log.Printf("Crossover: repaired vertical validation failed (%v) — falling back to parent1 clone", errs)
+			return cloneParentAsOffspring(parent1, default_encoding_resource, curriculums, selected_semester)
+		}
+
+		if errs := HorizontalValidation(repaired_sched, curriculums, department_to_encode, selected_semester); len(errs) > 0 {
+			log.Printf("Crossover: repaired horizontal validation failed (%v) — falling back to parent1 clone", errs)
+			return cloneParentAsOffspring(parent1, default_encoding_resource, curriculums, selected_semester)
 		}
 
 		return &SchedAndResources{
 			UniSched:  repaired_sched,
 			Resources: repaired_encoding_resource,
 		}, nil
+	}
+
+	if err := ValidateEncodingResource(offspring, offspring_encode_resource, curriculums, selected_semester); err != nil {
+		return nil, fmt.Errorf("crossover offspring encoding resource validation failed: %w", err)
+	}
+
+	if errs := offspring.VerticalValidation(rooms); len(errs) > 0 {
+		return nil, fmt.Errorf("crossover offspring failed vertical validation: %v", errs)
+	}
+
+	if errs := HorizontalValidation(offspring, curriculums, department_to_encode, selected_semester); len(errs) > 0 {
+		return nil, fmt.Errorf("crossover offspring failed horizontal validation: %v", errs)
 	}
 
 	return &SchedAndResources{

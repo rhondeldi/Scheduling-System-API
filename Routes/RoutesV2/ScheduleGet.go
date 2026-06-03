@@ -76,6 +76,8 @@ func GetJsonClassSchedule(ctx *gin.Context) {
 		log.Println(err_set_cache.Error())
 	}
 
+	ctx.Header("X-Schedule-Version", fmt.Sprintf("%d", RouteGlobals.RecentScheduleUpdate.Load()))
+
 	// get all curriculums
 
 	all_curriculums, err_read_all_curriculum := RouteGlobals.ResourcesPersistence.ReaderService.ReadAllCurriculum()
@@ -138,7 +140,7 @@ func GetJsonClassSchedule(ctx *gin.Context) {
 	))
 
 	log.Printf("     class measured fitness : %f", GeneticAlgorithm.MeasureWeekTimeTableBasicFitness(
-		selected_class_schedule[0],
+		selected_class_schedule[0], nil,
 	))
 
 	// process schedule information

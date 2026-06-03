@@ -27,6 +27,7 @@ func (s *JsonReader) ReadAllInstructors() ([]Instructors.Instructor, error) {
 			FirstName:     instructor_with_time_str.FirstName,
 			MiddleInitial: instructor_with_time_str.MiddleInitial,
 			LastName:      instructor_with_time_str.LastName,
+			DesignatedSubjectIDs: instructor_with_time_str.DesignatedSubjectIDs,
 		}
 
 		instructor.Time.StringParse(instructor_with_time_str.Time)
@@ -58,6 +59,7 @@ func (s *JsonReader) ReadDepartmentInstructors(department_id int) ([]Instructors
 			FirstName:     instructor_with_time_str.FirstName,
 			MiddleInitial: instructor_with_time_str.MiddleInitial,
 			LastName:      instructor_with_time_str.LastName,
+			DesignatedSubjectIDs: instructor_with_time_str.DesignatedSubjectIDs,
 		}
 
 		instructor.Time.StringParse(instructor_with_time_str.Time)

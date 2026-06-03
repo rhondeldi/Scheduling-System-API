@@ -10,12 +10,14 @@ import (
 )
 
 type MongoDB struct {
-	Client      *mongo.Client
-	Departments *mongo.Collection
-	Curriculums *mongo.Collection
-	Subjects    *mongo.Collection
-	Rooms       *mongo.Collection
-	Instructors *mongo.Collection
+	Client               *mongo.Client
+	AdminCredentials     *mongo.Collection
+	Departments          *mongo.Collection
+	Curriculums          *mongo.Collection
+	Subjects             *mongo.Collection
+	Rooms                *mongo.Collection
+	Instructors          *mongo.Collection
+	AsyncScheduleRecords *mongo.Collection
 }
 
 func NewMongodbClient() *mongo.Client {

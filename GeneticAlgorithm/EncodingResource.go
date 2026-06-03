@@ -337,13 +337,18 @@ func GenerateEncodingResourceFromUniTimeTable(
 
 	IterateSectionsWeekSchedule(university_schedules, curriculums, selected_semester, nil, nil,
 		func(indicies IterIndices, values IterValues) IterReturnType {
+			// If there is no week schedule for this section, skip it.
+			if values.WeekSched == nil {
+				return IterProceed
+			}
+
 			for day := 0; day < Const.N_WEEKLY_SCHOOL_DAYS; day++ {
 				for time_slot := 0; time_slot < Const.N_DAILY_TIME_SLOTS; time_slot++ {
-					subject_id := university_schedules[indicies.Usi][day].GetTimeSlot(time_slot).GetSubjectID()
+					subject_id := values.WeekSched[day].GetTimeSlot(time_slot).GetSubjectID()
 
 					if subject_id != 0 {
-						instructor_id := university_schedules[indicies.Usi][day].GetTimeSlot(time_slot).GetInstructorID()
-						room_id := university_schedules[indicies.Usi][day].GetTimeSlot(time_slot).GetRoomID()
+						instructor_id := values.WeekSched[day].GetTimeSlot(time_slot).GetInstructorID()
+						room_id := values.WeekSched[day].GetTimeSlot(time_slot).GetRoomID()
 
 						if instructor_id == 0 {
 							log.Panic("there should be an instructor allocation here, why there is none?")

@@ -28,8 +28,6 @@ GET:
 	"/dept_gen_result?department_id=[N>0]&semester=[0-1]"
 */
 func GetDeptartmentGenerationResult(ctx *gin.Context) {
-	log.Print("GetDeptartmentGenerationResult: call")
-
 	department_id, is_valid_department_id := IsValidParameterDepartmentID(ctx)
 	if !is_valid_department_id {
 		log.Print("GetDeptartmentGenerationResult: invalid department id")

@@ -20,6 +20,7 @@ func (s *MongodbWriter) CreateInstructor(arg_instructor Instructors.Instructor) 
 		FirstName:     arg_instructor.FirstName,
 		MiddleInitial: arg_instructor.MiddleInitial,
 		LastName:      arg_instructor.LastName,
+		DesignatedSubjectIDs: arg_instructor.DesignatedSubjectIDs,
 	}
 
 	new_instructor.Time = arg_instructor.Time.Stringify()
@@ -92,6 +93,7 @@ func (s *MongodbWriter) UpdateInstructor(arg_updated_instructor Instructors.Inst
 		FirstName:     arg_updated_instructor.FirstName,
 		MiddleInitial: arg_updated_instructor.MiddleInitial,
 		LastName:      arg_updated_instructor.LastName,
+		DesignatedSubjectIDs: arg_updated_instructor.DesignatedSubjectIDs,
 	}
 
 	updated_instructor.Time = arg_updated_instructor.Time.Stringify()

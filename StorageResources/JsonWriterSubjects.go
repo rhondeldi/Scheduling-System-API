@@ -17,6 +17,8 @@ func (s *JsonWriter) CreateSubject(new_subject Curriculum.Subject) error {
 		return errors.New("cannot create a new subject with a non zero subject ID because that would overwrite a subject item")
 	}
 
+	new_subject.NormalizeAsyncConfig()
+
 	SubjectMutex.Lock()
 	defer SubjectMutex.Unlock()
 
@@ -38,6 +40,10 @@ func (s *JsonWriter) CreateSubject(new_subject Curriculum.Subject) error {
 		Name:                  new_subject.Name,
 		LecHours:              new_subject.LecHours,
 		LabHours:              new_subject.LabHours,
+		SubjectType:           new_subject.SubjectType,
+		AsynchronousHours:     new_subject.AsynchronousHours,
+		SynchronousHours:      new_subject.SynchronousHours,
+		SaturdayOnly:          new_subject.SaturdayOnly,
 		BitFlags:              new_subject.BitFlags,
 		DesignatedInstructors: new_subject.DesignatedInstructors,
 	})
@@ -56,6 +62,8 @@ func (s *JsonWriter) UpdateSubject(subject_to_update Curriculum.Subject) error {
 	if subject_to_update.ID == 0 {
 		return errors.New("parameter argument missing invalid subject ID")
 	}
+
+	subject_to_update.NormalizeAsyncConfig()
 
 	SubjectMutex.Lock()
 	defer SubjectMutex.Unlock()
@@ -93,6 +101,10 @@ func (s *JsonWriter) UpdateSubject(subject_to_update Curriculum.Subject) error {
 		Name:                  subject_to_update.Name,
 		LecHours:              subject_to_update.LecHours,
 		LabHours:              subject_to_update.LabHours,
+		SubjectType:           subject_to_update.SubjectType,
+		AsynchronousHours:     subject_to_update.AsynchronousHours,
+		SynchronousHours:      subject_to_update.SynchronousHours,
+		SaturdayOnly:          subject_to_update.SaturdayOnly,
 		BitFlags:              subject_to_update.BitFlags,
 		DesignatedInstructors: subject_to_update.DesignatedInstructors,
 	}

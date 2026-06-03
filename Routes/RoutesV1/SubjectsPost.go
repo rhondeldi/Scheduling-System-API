@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/mrdcvlsc/scheduling-system-backend/Auth"
-	"github.com/mrdcvlsc/scheduling-system-backend/Resources/Curriculum"
 	"github.com/mrdcvlsc/scheduling-system-backend/RouteGlobals"
 )
 
@@ -21,10 +20,17 @@ func PostSubject(ctx *gin.Context) {
 		return
 	}
 
-	add_subject := Curriculum.Subject{}
+	payload := SubjectUpsertPayload{}
 
-	if err := ctx.BindJSON(&add_subject); err != nil {
+	if err := ctx.BindJSON(&payload); err != nil {
 		ctx.String(http.StatusBadRequest, "we are unable to properly read the subject to be added")
+		return
+	}
+
+	add_subject := buildSubjectFromPayload(payload)
+
+	if err := normalizeAndValidateSubjectPayload(&add_subject); err != nil {
+		ctx.String(http.StatusBadRequest, err.Error())
 		return
 	}
 
