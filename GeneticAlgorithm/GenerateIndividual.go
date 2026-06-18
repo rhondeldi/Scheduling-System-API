@@ -25,6 +25,27 @@ const (
 
 const ALLOW_SPECIALIZED_INSTRUCTOR_FALLBACK bool = true
 
+// LOCK_INSTRUCTORS_TO_DESIGNATED_SUBJECTS, when true, forbids an instructor who
+// has been assigned (designated) to specific subjects from ever being scheduled
+// for a subject they were not assigned to. Subjects without an assigned
+// instructor can still be filled by general (unassigned) instructors only.
+// Set to false to allow assigned instructors to be used as a last resort for
+// other subjects when no one else is available.
+//
+// Kept false so the generator does not restrict itself to a subject's
+// designated and general instructors: when those are all booked, any other
+// instructor in the department who is free at the time slot may be borrowed as
+// a last resort (designated instructors are still tried first), rather than
+// failing with "not enough specialized/fallback instructors".
+const LOCK_INSTRUCTORS_TO_DESIGNATED_SUBJECTS bool = false
+
+// ENFORCE_FOUR_DAY_PACKING, when true, forbids a section's non-NSTP classes from
+// being spread across more than Const.MAX_NON_NSTP_SCHOOL_DAYS distinct days.
+// NSTP 1/2 subjects are Saturday-pinned and are exempt from this count, so a
+// section can still hold an NSTP class on an additional day. Set to false to
+// restore the previous behaviour of allowing classes on every school day.
+const ENFORCE_FOUR_DAY_PACKING bool = true
+
 const (
 	DIST_FRONT_COMPRESSED int = 0
 	DIST_BACK_COMPRESSED  int = 1
@@ -118,6 +139,48 @@ func EncodeIndividualGenome(
 
 	successful_generated_section_schedules := 0
 
+	/////////////////////////////////////////////////////////////////////////////////////////////////////////
+	//        PRE-COMPUTE INSTRUCTORS THAT ARE DESIGNATED/ASSIGNED TO AT LEAST ONE SUBJECT (ANYWHERE)
+	/////////////////////////////////////////////////////////////////////////////////////////////////////////
+	//
+	// An instructor can be tied to subjects through TWO independent mechanisms:
+	//
+	//   1. instructor-side: Instructor.DesignatedSubjectIDs (assigned via the
+	//      "assign subjects to an instructor" route), and
+	//   2. subject-side: Subject.DesignatedInstructors / "DesignatedInstructorsID"
+	//      (entered by the panelist when adding the subject to a curriculum).
+	//
+	// Either one makes the instructor a "specialist". With
+	// LOCK_INSTRUCTORS_TO_DESIGNATED_SUBJECTS enabled, a specialist may ONLY be
+	// scheduled for the subjects they are designated to and must never be poached
+	// for any other subject/year/semester. We must therefore detect specialists
+	// using BOTH mechanisms, otherwise an instructor assigned purely on the
+	// subject-side (empty DesignatedSubjectIDs) would look like a free "general"
+	// instructor and leak into unrelated subjects.
+
+	instructor_is_designated_somewhere := make(map[uint16]bool)
+
+	for dept_id := range encoding_resource.DeptIdToInstructors {
+		dept_instructors := encoding_resource.DeptIdToInstructors[dept_id]
+		for i := range dept_instructors {
+			if len(dept_instructors[i].DesignatedSubjectIDs) > 0 {
+				instructor_is_designated_somewhere[dept_instructors[i].InstructorID] = true
+			}
+		}
+	}
+
+	for c := range curriculums {
+		for y := range curriculums[c].YearLevels {
+			for s := range curriculums[c].YearLevels[y].Semesters {
+				for _, subject := range curriculums[c].YearLevels[y].Semesters[s].Subjects {
+					for _, designated_id := range subject.DesignatedInstructors {
+						instructor_is_designated_somewhere[designated_id] = true
+					}
+				}
+			}
+		}
+	}
+
 	IterateSectionsWeekSchedule(university_schedules, curriculums, selected_semester,
 
 		func(indicies IterIndices, values IterValues) IterReturnType {
@@ -150,6 +213,21 @@ func EncodeIndividualGenome(
 				log.Fatalf("EncodeIndividualGenome: usi index out of range: usi=%d, len(university_schedules)=%d. This usually means the number of sections in all curriculums for the selected semester exceeds the length of university_schedules. Check allocation logic.", usi, len(university_schedules))
 			}
 			week_time_table := university_schedules[usi]
+
+			// 4-DAY PACKING TRACKER (per section): number of non-NSTP subject blocks
+			// placed on each day index. A day is "in use" by non-NSTP classes when
+			// its count is > 0. Used to keep a section's non-NSTP classes within
+			// Const.MAX_NON_NSTP_SCHOOL_DAYS distinct days (see ENFORCE_FOUR_DAY_PACKING).
+			section_non_nstp_day_block_count := make(map[int]int)
+			distinct_non_nstp_days := func() int {
+				count := 0
+				for _, block_count := range section_non_nstp_day_block_count {
+					if block_count > 0 {
+						count++
+					}
+				}
+				return count
+			}
 
 			/////////////////////////////////////////////////////////////////////////////////////////////////////////
 			//                                    SHUFFLE ROOMS AND SUBJECT
@@ -185,6 +263,26 @@ func EncodeIndividualGenome(
 			subj_assign_fail_possible_reason["not-enough-instructors"] = 0
 			subj_assign_fail_possible_reason["not-enough-rooms"] = 0
 
+			// Spread this section's non-NSTP subjects over a TARGET number of class
+			// days so each day ends up with ~2-3 subjects rather than one day holding
+			// many and another a lone subject. Target ≈ round(count / 2.5), clamped to
+			// [1, MAX_NON_NSTP_SCHOOL_DAYS]; subjects are then round-robined across
+			// those days (see subject_window_day below).
+			non_nstp_subject_total := 0
+			for _, s := range semester.Subjects {
+				if !isNSTP1Or2Subject(s) {
+					non_nstp_subject_total++
+				}
+			}
+			target_class_days := (4*non_nstp_subject_total + 5) / 10 // ≈ round(total / 2.5)
+			if target_class_days < 1 {
+				target_class_days = 1
+			}
+			if target_class_days > Const.MAX_NON_NSTP_SCHOOL_DAYS {
+				target_class_days = Const.MAX_NON_NSTP_SCHOOL_DAYS
+			}
+			non_nstp_subject_index := 0
+
 			for _, subject := range semester.Subjects {
 				isNSTPSubject := isNSTP1Or2Subject(subject)
 
@@ -198,6 +296,15 @@ func EncodeIndividualGenome(
 							continue // skip since subject was already assigned
 						}
 					}
+				}
+
+				// round-robin position of this non-NSTP subject across the section's
+				// target class days, so day-major search starts each successive subject
+				// on the next day in the window and the subjects spread ~evenly (2-3/day).
+				subject_window_day := 0
+				if !isNSTPSubject {
+					subject_window_day = non_nstp_subject_index % target_class_days
+					non_nstp_subject_index++
 				}
 
 				var selected_instructor *Instructors.Instructor
@@ -218,93 +325,140 @@ func EncodeIndividualGenome(
 				}
 
 				/////////////////////////////////////////////////////////////////////////////////////////////////////////
-				//               POPULATE SPECIALIZED INSTRUCTOR LIST FOR THE SUBJECT IF THEY EXIST
+				//        BUILD THE ORDERED INSTRUCTOR CANDIDATE LIST FOR THE SUBJECT (TIERED PRIORITIZATION)
 				/////////////////////////////////////////////////////////////////////////////////////////////////////////
+				//
+				// Instructors are tried in this strict order so that an instructor who was
+				// explicitly assigned (designated) to a subject is prioritized, and an
+				// instructor who is designated to OTHER subjects is NOT poached for an
+				// unrelated subject unless there is genuinely no one else available:
+				//
+				//   tier 1 - instructors designated to THIS subject       (least loaded first)
+				//   tier 2 - general instructors with no designations      (least loaded first)
+				//   tier 3 - instructors designated to OTHER subjects      (least loaded first) <- last resort
+				//
+				// This fixes the case where an instructor assigned to a few specific subjects
+				// would get pulled into other year levels / unrelated subjects just because
+				// they had the lightest teaching load.
+				//
+				// When LOCK_INSTRUCTORS_TO_DESIGNATED_SUBJECTS is true (the default), tier 3 is
+				// dropped entirely: an instructor who is designated to some subjects is locked
+				// to those subjects and can NEVER teach a subject they were not assigned to,
+				// even if that leaves a subject with no available instructor (which surfaces as
+				// a generation error rather than silently poaching the assigned instructor).
+				// tier 2 (general, unassigned instructors) can still fill any gap.
 
-				specialized_instructors := make([]*Instructors.Instructor, 0)
+				designated_ids := make(map[uint16]bool, len(subject.DesignatedInstructors))
+				for _, designated_id := range subject.DesignatedInstructors {
+					designated_ids[designated_id] = true
+				}
 
-				if len(subject.DesignatedInstructors) > 0 {
-					instructor_id_to_instructor := make(map[uint16]*Instructors.Instructor)
+				tier_designated := make([]*Instructors.Instructor, 0)
+				tier_general := make([]*Instructors.Instructor, 0)
+				tier_other_specialist := make([]*Instructors.Instructor, 0)
 
-					for i := range instructors {
-						instructor_id_to_instructor[instructors[i].InstructorID] = &instructors[i]
+				// candidate pool = department instructors + general (department 0) instructors.
+				seen_candidate_ids := make(map[uint16]bool)
+				classify_candidate := func(instructor *Instructors.Instructor) {
+					if seen_candidate_ids[instructor.InstructorID] {
+						return
 					}
+					seen_candidate_ids[instructor.InstructorID] = true
 
-					for i := range encoding_resource.DeptIdToInstructors[0] {
-						instructor_id_to_instructor[encoding_resource.DeptIdToInstructors[0][i].InstructorID] = &encoding_resource.DeptIdToInstructors[0][i]
+					switch {
+					case designated_ids[instructor.InstructorID]:
+						// designated to THIS subject -> highest priority.
+						tier_designated = append(tier_designated, instructor)
+					case !instructor_is_designated_somewhere[instructor.InstructorID]:
+						// not assigned to any subject anywhere -> a free, general instructor.
+						tier_general = append(tier_general, instructor)
+					default:
+						// assigned to OTHER subjects -> locked out (last resort only).
+						tier_other_specialist = append(tier_other_specialist, instructor)
 					}
+				}
 
-					for _, specialized_id := range subject.DesignatedInstructors {
-						if _, has_id := instructor_id_to_instructor[specialized_id]; has_id {
-							specialized_instructors = append(specialized_instructors, instructor_id_to_instructor[specialized_id])
-						}
-					}
+				for i := range instructors {
+					classify_candidate(&instructors[i])
+				}
+				for i := range encoding_resource.DeptIdToInstructors[0] {
+					classify_candidate(&encoding_resource.DeptIdToInstructors[0][i])
+				}
 
-					if len(specialized_instructors) == 0 {
-						if !ALLOW_SPECIALIZED_INSTRUCTOR_FALLBACK {
-							is_to_return = true
+				// a designated subject whose designated instructor(s) are not in the pool
+				// is only an error when fallback to other instructors is disallowed.
+				if len(subject.DesignatedInstructors) > 0 && len(tier_designated) == 0 && !ALLOW_SPECIALIZED_INSTRUCTOR_FALLBACK {
+					is_to_return = true
 
-							return_uni_time_table = nil
-							return_encoding_resource = nil
-							return_error = fmt.Errorf(
-								"error encode individual genome, the specialized instructor(s) added in %s, %s, %s, section %s, subject %s, are not found in the department instructors and general instructors list",
-								curriculum.CurriculumCode, year_level.Name, semester.Name, Curriculum.SECTION[section_idx], subject.Code,
-							)
+					return_uni_time_table = nil
+					return_encoding_resource = nil
+					return_error = fmt.Errorf(
+						"error encode individual genome, the specialized instructor(s) added in %s, %s, %s, section %s, subject %s, are not found in the department instructors and general instructors list",
+						curriculum.CurriculumCode, year_level.Name, semester.Name, Curriculum.SECTION[section_idx], subject.Code,
+					)
 
-							return IterBreakCurriculumLoop
-						}
-					}
+					return IterBreakCurriculumLoop
+				}
 
-					// shuffle specialized instructors
-					rng.Shuffle(len(specialized_instructors), func(i, j int) {
-						specialized_instructors[i], specialized_instructors[j] = specialized_instructors[j], specialized_instructors[i]
+				// within each tier, shuffle then sort by load so the least loaded
+				// instructor is tried first. Balancing is primarily by assigned UNITS
+				// (so subjects spill over to other instructors as one approaches their
+				// unit cap, keeping the load balanced), with teaching hours as a
+				// tie-breaker.
+				shuffle_and_sort_by_load := func(tier []*Instructors.Instructor) {
+					rng.Shuffle(len(tier), func(i, j int) {
+						tier[i], tier[j] = tier[j], tier[i]
 					})
-
-					// sort the specialized_instructors based on the number of subjects they are assigned
-					sort.Slice(specialized_instructors, func(i, j int) bool {
-						return specialized_instructors[i].TotalTeachingHours < specialized_instructors[j].TotalTeachingHours
+					sort.Slice(tier, func(i, j int) bool {
+						if tier[i].AssignedUnits != tier[j].AssignedUnits {
+							return tier[i].AssignedUnits < tier[j].AssignedUnits
+						}
+						return tier[i].TotalTeachingHours < tier[j].TotalTeachingHours
 					})
+				}
 
-					if ALLOW_SPECIALIZED_INSTRUCTOR_FALLBACK {
-						specialized_ids := make(map[uint16]bool)
-						for _, instructor := range specialized_instructors {
-							specialized_ids[instructor.InstructorID] = true
-						}
+				shuffle_and_sort_by_load(tier_designated)
+				shuffle_and_sort_by_load(tier_general)
+				shuffle_and_sort_by_load(tier_other_specialist)
 
-						fallback_instructors := make([]*Instructors.Instructor, 0, len(instructors)+len(encoding_resource.DeptIdToInstructors[0]))
-						for i := range instructors {
-							if specialized_ids[instructors[i].InstructorID] {
-								continue
-							}
-							fallback_instructors = append(fallback_instructors, &instructors[i])
-						}
-						for i := range encoding_resource.DeptIdToInstructors[0] {
-							if specialized_ids[encoding_resource.DeptIdToInstructors[0][i].InstructorID] {
-								continue
-							}
-							fallback_instructors = append(fallback_instructors, &encoding_resource.DeptIdToInstructors[0][i])
-						}
+				target_instructors := make([]*Instructors.Instructor, 0, len(seen_candidate_ids))
+				target_instructors = append(target_instructors, tier_designated...)
 
-						rng.Shuffle(len(fallback_instructors), func(i, j int) {
-							fallback_instructors[i], fallback_instructors[j] = fallback_instructors[j], fallback_instructors[i]
-						})
+				// fall back to the rest of the pool when the subject has no designation,
+				// or when fallback is explicitly allowed for a designated subject.
+				subject_has_assigned_instructor := len(subject.DesignatedInstructors) > 0
+				if !subject_has_assigned_instructor || ALLOW_SPECIALIZED_INSTRUCTOR_FALLBACK {
+					// general (unassigned) instructors can always fill a gap.
+					target_instructors = append(target_instructors, tier_general...)
 
-						sort.Slice(fallback_instructors, func(i, j int) bool {
-							return fallback_instructors[i].TotalTeachingHours < fallback_instructors[j].TotalTeachingHours
-						})
-
-						specialized_instructors = append(specialized_instructors, fallback_instructors...)
+					// instructors designated to OTHER subjects (specialists) are only used as
+					// an absolute last resort, AFTER general instructors. With the lock on we
+					// still refuse to poach a specialist into a subject that already has its
+					// own assigned instructor; but a subject that has NO assigned instructor at
+					// all may borrow a specialist (least loaded first, thanks to the sort
+					// above) so the schedule can still complete.
+					allow_specialist_last_resort := !subject_has_assigned_instructor || !LOCK_INSTRUCTORS_TO_DESIGNATED_SUBJECTS
+					if allow_specialist_last_resort {
+						target_instructors = append(target_instructors, tier_other_specialist...)
 					}
-				} else {
-					// shuffle instructors
-					rng.Shuffle(len(instructors), func(i, j int) {
-						instructors[i], instructors[j] = instructors[j], instructors[i]
-					})
+				}
 
-					// sort the instructors based on the number of subjects they are assigned
-					sort.Slice(instructors, func(i, j int) bool {
-						return instructors[i].TotalTeachingHours < instructors[j].TotalTeachingHours
-					})
+				// it is still possible that no instructor is eligible for a subject (e.g. an
+				// assigned subject whose only designated instructor is not in the department
+				// pool and there are no general instructors to fall back on). surface this as
+				// a clean generation error instead of letting the assignment loop index into
+				// an empty candidate list.
+				if len(target_instructors) == 0 {
+					is_to_return = true
+
+					return_uni_time_table = university_schedules
+					return_encoding_resource = nil
+					return_error = fmt.Errorf(
+						"error encode individual genome, no eligible instructor for subject %s in %s, %s, %s, section %s: no designated, general, or borrowable instructor is available for it",
+						subject.Code, curriculum.CurriculumCode, semester.Name, year_level.Name, Curriculum.SECTION[section_idx],
+					)
+
+					return IterBreakCurriculumLoop
 				}
 
 				is_double_block_subject := (subject.LecHours > 0) && (subject.LabHours > 0)
@@ -326,16 +480,8 @@ func EncodeIndividualGenome(
 				for {
 					target_instructor_idx++
 
-					var target_instructor *Instructors.Instructor
-					number_of_target_instructors := 0
-
-					if len(subject.DesignatedInstructors) > 0 {
-						number_of_target_instructors = len(specialized_instructors)
-						target_instructor = specialized_instructors[target_instructor_idx]
-					} else {
-						number_of_target_instructors = len(instructors)
-						target_instructor = &instructors[target_instructor_idx]
-					}
+					number_of_target_instructors := len(target_instructors)
+					target_instructor := target_instructors[target_instructor_idx]
 
 					// undo the allocation of the previous first subject block if the previous second block failed
 
@@ -348,6 +494,50 @@ func EncodeIndividualGenome(
 
 						prev_initial_block_instructor.AssignedSubjects--
 						prev_initial_block_instructor.TotalTeachingHours -= (float32(prev_initial_block_timeslot_count) / float32(Const.N_HOUR_TIME_SLOTS))
+						prev_initial_block_instructor.AssignedUnits -= uint16(subject.Units)
+
+						if !isNSTPSubject && prev_initial_block_day >= 0 {
+							section_non_nstp_day_block_count[prev_initial_block_day]--
+						}
+					}
+
+					/////////////////////////////////////////////////////////////////////////////////////////////////////////
+					//                    HARD CONSTRAINT — INSTRUCTOR WEEKLY UNIT CAP (NO OVERLOAD)
+					/////////////////////////////////////////////////////////////////////////////////////////////////////////
+					//
+					// Skip any candidate whose weekly unit load would exceed their cap once this
+					// subject is added. Regular instructors are capped at the regular maximum;
+					// part-time instructors at their (lower) configured cap. Subjects with 0
+					// units (legacy data) never trigger this. When every remaining candidate
+					// would be overloaded we surface a clean generation error instead of
+					// silently overloading an instructor.
+					//
+					// Check the instructor that will actually receive this subject's load:
+					// once a (double-block) subject has pinned an instructor via
+					// selected_instructor, retries re-use that same instructor, so the cap
+					// must be evaluated against it — the undo above already restored its
+					// headroom, so a previously-fitting instructor still fits here.
+					cap_check_instructor := target_instructor
+					if selected_instructor != nil {
+						cap_check_instructor = selected_instructor
+					}
+
+					subject_units := uint16(subject.Units)
+					if subject_units > 0 && (cap_check_instructor.AssignedUnits+subject_units) > uint16(cap_check_instructor.EffectiveMaxUnits()) {
+						if selected_instructor == nil && target_instructor_idx >= number_of_target_instructors-1 {
+							is_to_return = true
+
+							return_uni_time_table = university_schedules
+							return_encoding_resource = nil
+							return_error = fmt.Errorf(
+								"error encode individual genome, no instructor can teach subject %s (%d units) without exceeding their weekly unit cap in %s, %s, %s, section %s",
+								subject.Code, subject_units, curriculum.CurriculumCode, semester.Name, year_level.Name, Curriculum.SECTION[section_idx],
+							)
+
+							return IterBreakCurriculumLoop
+						}
+
+						continue target_instructor_loop
 					}
 
 					/////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -394,15 +584,41 @@ func EncodeIndividualGenome(
 						n := Const.N_WEEKLY_SCHOOL_DAYS
 						total_iterations := n * m
 
+						// Stagger each section's preferred starting day so sections spread
+						// across the whole week instead of all packing onto the same first
+						// days — that clustering is what makes a tight day cap (e.g. 4)
+						// infeasible. There are (n - MAX_NON_NSTP_SCHOOL_DAYS + 1) contiguous
+						// day-windows of MAX_NON_NSTP_SCHOOL_DAYS days; section usi takes the
+						// window usi % windowCount and is explored day-major from its first
+						// day, so it fills consecutive days (compact, large-gap-free) and the
+						// packing limit then keeps it inside that window. Remaining days are
+						// still visited afterwards as a fallback so the exhaustion checks below
+						// stay correct.
+						windowCount := n - Const.MAX_NON_NSTP_SCHOOL_DAYS + 1
+						if windowCount < 1 {
+							windowCount = 1
+						}
+						section_day_offset := usi % windowCount
+
 						for i := range total_iterations {
 							var day, time_slot int
 
-							if distribution_type == 0 {
-								day = i / m
-								time_slot = i % m
+							// NSTP keeps the original ordering: it is Saturday-pinned, and the
+							// natural order guarantees the final attempt lands on the last day
+							// (Saturday) so the NSTP-only Saturday `continue` below does not skip
+							// the exhaustion/placement check. Non-NSTP subjects use staggered
+							// day-major search.
+							if isNSTPSubject {
+								if distribution_type == 0 {
+									day = i / m
+									time_slot = i % m
+								} else {
+									time_slot = i / n
+									day = i % n
+								}
 							} else {
-								time_slot = i / n
-								day = i % n
+								day = (section_day_offset + subject_window_day + (i / m)) % n
+								time_slot = i % m
 							}
 
 							// NSTP 1 and NSTP 2 subjects are constrained to Saturday only.
@@ -417,6 +633,17 @@ func EncodeIndividualGenome(
 							/////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 							is_time_slot_available := day_sched.IsTimeAvailable(time_slot, subject_total_time_slots)
+
+							// HARD CONSTRAINT — 4-day packing. A non-NSTP subject may not open an
+							// additional teaching day for the section once it already occupies the
+							// maximum number of distinct non-NSTP days. Treated as slot
+							// unavailability so the existing exhaustion / next-instructor / error
+							// machinery handles it uniformly.
+							if ENFORCE_FOUR_DAY_PACKING && is_time_slot_available && !isNSTPSubject &&
+								section_non_nstp_day_block_count[day] == 0 &&
+								distinct_non_nstp_days() >= Const.MAX_NON_NSTP_SCHOOL_DAYS {
+								is_time_slot_available = false
+							}
 
 							if !is_time_slot_available && i == total_iterations-1 && (target_instructor_idx == (number_of_target_instructors - 1)) {
 								is_to_return = true
@@ -470,6 +697,16 @@ func EncodeIndividualGenome(
 								}
 							}
 
+							// NOTE: 7:00am avoidance is handled purely by the fitness function
+							// (EARLY_MORNING_CLASS_PENALTY/REWARD), NOT by skipping slot 0 here.
+							// An earlier encoder-level hard skip of slot 0 removed a column of
+							// morning capacity and, combined with the hard 4-day packing rule and
+							// instructor locking/unit caps, made dense upper-year sections
+							// infeasible (genesis "no time slot" / "not enough instructors"
+							// failures). Steering 7am at genesis is not worth breaking feasibility;
+							// the GA still shifts classes later over generations via the fitness
+							// penalty.
+
 							/////////////////////////////////////////////////////////////////////////////////////////////////////////
 							//                          FIND AVAILABLE INSTRUCTOR FOR THE TIME SLOT
 							/////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -493,34 +730,18 @@ func EncodeIndividualGenome(
 
 							instructor_search_iteration++
 
-							if len(subject.DesignatedInstructors) > 0 {
-								if (!is_available_instructor && ((target_instructor_idx == len(specialized_instructors)-1) || selected_instructor != nil)) && i == total_iterations-1 {
-									is_to_return = true
+							if (!is_available_instructor && ((target_instructor_idx == number_of_target_instructors-1) || selected_instructor != nil)) && i == total_iterations-1 {
+								is_to_return = true
 
-									return_uni_time_table = university_schedules
-									return_encoding_resource = nil
-									return_error = fmt.Errorf(
-										"error encode individual genome, not enough specialized/fallback instructors (%d) in %s for %s, %s, %s, section %s, after generating schedules for the previous %d other sections",
-										len(specialized_instructors), ro_dept_id_to_department[curriculum.DepartmentID].Name,
-										curriculum.CurriculumCode, semester.Name, year_level.Name, Curriculum.SECTION[section_idx], successful_generated_section_schedules,
-									)
+								return_uni_time_table = university_schedules
+								return_encoding_resource = nil
+								return_error = fmt.Errorf(
+									"error encode individual genome, not enough specialized/fallback instructors (%d) in %s for %s, %s, %s, section %s, after generating schedules for the previous %d other sections",
+									number_of_target_instructors, ro_dept_id_to_department[curriculum.DepartmentID].Name,
+									curriculum.CurriculumCode, semester.Name, year_level.Name, Curriculum.SECTION[section_idx], successful_generated_section_schedules,
+								)
 
-									return IterBreakCurriculumLoop
-								}
-							} else {
-								if (!is_available_instructor && ((target_instructor_idx == len(instructors)-1) || selected_instructor != nil)) && i == total_iterations-1 {
-									is_to_return = true
-
-									return_uni_time_table = university_schedules
-									return_encoding_resource = nil
-									return_error = fmt.Errorf(
-										"error encode individual genome, not enough instructors (%d) in %s for %s, %s, %s, section %s, after generating schedules for the previous %d other sections",
-										len(instructors), ro_dept_id_to_department[curriculum.DepartmentID].Name,
-										curriculum.CurriculumCode, semester.Name, year_level.Name, Curriculum.SECTION[section_idx], successful_generated_section_schedules,
-									)
-
-									return IterBreakCurriculumLoop
-								}
+								return IterBreakCurriculumLoop
 							}
 
 							if !is_available_instructor && (i == (total_iterations - 1)) {
@@ -679,11 +900,7 @@ func EncodeIndividualGenome(
 							if selected_instructor == nil {
 								// fmt.Printf("selecting the instructor found for the time slot [d:%d, ts:%d]...\n", day, time_slot) // DEBUG PRINTS
 
-								if len(subject.DesignatedInstructors) > 0 {
-									selected_instructor = specialized_instructors[selected_instructor_idx]
-								} else {
-									selected_instructor = &instructors[selected_instructor_idx]
-								}
+								selected_instructor = target_instructors[selected_instructor_idx]
 							}
 
 							/////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -746,7 +963,15 @@ func EncodeIndividualGenome(
 
 							if !is_subject_type_added_once {
 								selected_instructor.AssignedSubjects++
+								selected_instructor.AssignedUnits += uint16(subject.Units)
 								is_subject_type_added_once = true
+							}
+
+							// record the day this non-NSTP block occupies for the section's
+							// 4-day packing budget (counted once per placed block; a double-block
+							// lec+lab subject may legitimately occupy two days).
+							if ENFORCE_FOUR_DAY_PACKING && !isNSTPSubject {
+								section_non_nstp_day_block_count[day]++
 							}
 
 							selected_instructor.TotalTeachingHours += float32(subject_hours)

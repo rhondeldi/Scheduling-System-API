@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mrdcvlsc/scheduling-system-backend/GeneticAlgorithm"
@@ -23,6 +25,74 @@ type InstructorTableItem struct {
 	FirstName     string `json:"FirstName"`
 	MiddleInitial string `json:"MiddleInitial"`
 	LastName      string `json:"LastName"`
+
+	// employment division ("regular" / "part-time") and the instructor's
+	// effective weekly unit cap, surfaced so the table can show the division.
+	EmploymentType string `json:"EmploymentType"`
+	MaxUnits       uint8  `json:"MaxUnits"`
+
+	// total credit units this instructor currently holds across all generated
+	// semester schedules (each subject in a section counted once). Kept for
+	// backward compatibility; prefer HeldUnitsPerSemester since the unit cap
+	// applies to each semester independently.
+	HeldUnits uint16 `json:"HeldUnits"`
+
+	// credit units this instructor holds in EACH generated semester schedule,
+	// indexed by semester (0 = 1st semester, 1 = 2nd semester, 2 = Mid-year);
+	// always length Curriculum.SUPPORTED_SEMESTERS. The per-instructor unit cap
+	// (MaxUnits) applies to each of these independently, so they are reported
+	// separately rather than summed into a single figure.
+	HeldUnitsPerSemester []uint16 `json:"HeldUnitsPerSemester"`
+}
+
+// computeInstructorHeldUnits walks every generated semester schedule and sums,
+// per instructor and per semester, the credit units of the subjects they are
+// assigned to (each subject in a section counted once). Best-effort: semesters
+// whose schedule cannot be obtained are left at zero. Returns instructor id ->
+// per-semester held units (slice indexed by semester, length
+// Curriculum.SUPPORTED_SEMESTERS).
+func computeInstructorHeldUnits() map[uint16][]uint16 {
+	held := make(map[uint16][]uint16)
+
+	subjects, err_read_subjects := RouteGlobals.ResourcesPersistence.ReaderService.ReadAllSubjects()
+	if err_read_subjects != nil {
+		log.Printf("computeInstructorHeldUnits: unable to read subjects: %s", err_read_subjects.Error())
+		return held
+	}
+
+	subject_id_to_units := make(map[uint16]uint8, len(subjects))
+	for _, subject := range subjects {
+		subject_id_to_units[subject.ID] = subject.Units
+	}
+
+	for semester := range Curriculum.SUPPORTED_SEMESTERS {
+		university_schedules, err_obtain := RoutesV1.ObtainUniversityScheduleNoContextNoHorizontalValidation(semester)
+		if err_obtain != nil || university_schedules == nil {
+			continue
+		}
+
+		for usi := range university_schedules {
+			counted_subjects := make(map[uint16]bool)
+
+			for day := 0; day < Const.N_WEEKLY_SCHOOL_DAYS; day++ {
+				for time_slot := 0; time_slot < Const.N_DAILY_TIME_SLOTS; time_slot++ {
+					subject_id := university_schedules[usi][day].GetTimeSlot(time_slot).GetSubjectID()
+					if subject_id == 0 || counted_subjects[subject_id] {
+						continue
+					}
+					counted_subjects[subject_id] = true
+
+					instructor_id := university_schedules[usi][day].GetTimeSlot(time_slot).GetInstructorID()
+					if held[instructor_id] == nil {
+						held[instructor_id] = make([]uint16, Curriculum.SUPPORTED_SEMESTERS)
+					}
+					held[instructor_id][semester] += uint16(subject_id_to_units[subject_id])
+				}
+			}
+		}
+	}
+
+	return held
 }
 
 type InstructorTablePage struct {
@@ -70,9 +140,9 @@ func GetDepartmentInstructors(ctx *gin.Context) {
 		return
 	}
 
-	department_instructors_page := make([]InstructorTableItem, 0)
+	instructor_held_units := computeInstructorHeldUnits()
 
-	total_instructors := 0
+	matched_instructors := make([]InstructorTableItem, 0)
 
 	for _, instructor := range all_instructors {
 		if int(instructor.DepartmentID) != department_id {
@@ -91,22 +161,55 @@ func GetDepartmentInstructors(ctx *gin.Context) {
 			continue
 		}
 
-		total_instructors++
-
-		if (total_instructors - 1) < (page_size * page) {
-			continue
+		held_per_semester := instructor_held_units[instructor.InstructorID]
+		if held_per_semester == nil {
+			// instructor holds nothing in any generated schedule; report zeros so
+			// the response always carries one entry per supported semester.
+			held_per_semester = make([]uint16, Curriculum.SUPPORTED_SEMESTERS)
 		}
 
-		if len(department_instructors_page) < page_size {
-			department_instructors_page = append(department_instructors_page, InstructorTableItem{
-				InstructorID:  instructor.InstructorID,
-				DepartmentID:  instructor.DepartmentID,
-				FirstName:     instructor.FirstName,
-				MiddleInitial: instructor.MiddleInitial,
-				LastName:      instructor.LastName,
-			})
+		held_total := uint16(0)
+		for _, semester_units := range held_per_semester {
+			held_total += semester_units
 		}
+
+		matched_instructors = append(matched_instructors, InstructorTableItem{
+			InstructorID:         instructor.InstructorID,
+			DepartmentID:         instructor.DepartmentID,
+			FirstName:            instructor.FirstName,
+			MiddleInitial:        instructor.MiddleInitial,
+			LastName:             instructor.LastName,
+			EmploymentType:       instructor.NormalizedEmploymentType(),
+			MaxUnits:             instructor.EffectiveMaxUnits(),
+			HeldUnits:            held_total,
+			HeldUnitsPerSemester: held_per_semester,
+		})
 	}
+
+	// Sort alphabetically by last name, then first name (case-insensitive), so
+	// pagination returns a globally ordered list rather than storage order.
+	sort.SliceStable(matched_instructors, func(i, j int) bool {
+		last_i := strings.ToLower(matched_instructors[i].LastName)
+		last_j := strings.ToLower(matched_instructors[j].LastName)
+		if last_i != last_j {
+			return last_i < last_j
+		}
+		return strings.ToLower(matched_instructors[i].FirstName) < strings.ToLower(matched_instructors[j].FirstName)
+	})
+
+	total_instructors := len(matched_instructors)
+
+	page_start := page_size * page
+	if page_start > total_instructors {
+		page_start = total_instructors
+	}
+
+	page_end := page_start + page_size
+	if page_end > total_instructors {
+		page_end = total_instructors
+	}
+
+	department_instructors_page := matched_instructors[page_start:page_end]
 
 	instructor_table_page := &InstructorTablePage{
 		Instructors:      department_instructors_page,

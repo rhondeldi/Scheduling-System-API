@@ -102,11 +102,13 @@ func PatchInstructor(ctx *gin.Context) {
 	}
 
 	update_instructor := Instructors.Instructor{
-		InstructorID:  update_instructor_with_time_str.InstructorID,
-		DepartmentID:  update_instructor_with_time_str.DepartmentID,
-		FirstName:     update_instructor_with_time_str.FirstName,
-		MiddleInitial: update_instructor_with_time_str.MiddleInitial,
-		LastName:      update_instructor_with_time_str.LastName,
+		InstructorID:   update_instructor_with_time_str.InstructorID,
+		DepartmentID:   update_instructor_with_time_str.DepartmentID,
+		FirstName:      update_instructor_with_time_str.FirstName,
+		MiddleInitial:  update_instructor_with_time_str.MiddleInitial,
+		LastName:       update_instructor_with_time_str.LastName,
+		EmploymentType: update_instructor_with_time_str.EmploymentType,
+		MaxUnits:       update_instructor_with_time_str.MaxUnits,
 		DesignatedSubjectIDs: selected_instructor.DesignatedSubjectIDs,
 	}
 

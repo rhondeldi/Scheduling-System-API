@@ -23,6 +23,17 @@ type Subject struct {
 	LecHours uint8  `json:"LecHours" bson:"LecHours"`
 	LabHours uint8  `json:"LabHours" bson:"LabHours"`
 
+	// academic credit units of the subject, split into the lecture component and
+	// the laboratory component. Distinct from contact hours (LecHours/LabHours).
+	LecUnits uint8 `json:"LecUnits" bson:"LecUnits"`
+	LabUnits uint8 `json:"LabUnits" bson:"LabUnits"`
+
+	// total credit units = LecUnits + LabUnits. Server-computed on save and used
+	// as the value counted toward an instructor's weekly unit cap during schedule
+	// generation. Defaults to 0 for legacy subjects, in which case the unit cap is
+	// effectively not enforced for them.
+	Units uint8 `json:"Units" bson:"Units"`
+
 	// lecture or laboratory
 	SubjectType string `json:"SubjectType,omitempty" bson:"SubjectType,omitempty"`
 

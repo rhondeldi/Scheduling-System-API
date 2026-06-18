@@ -510,6 +510,16 @@ func Crossover(
 			return cloneParentAsOffspring(parent1, default_encoding_resource, curriculums, selected_semester)
 		}
 
+		if errs := ValidateFourDayPacking(repaired_sched, curriculums, department_to_encode, selected_semester); len(errs) > 0 {
+			log.Printf("Crossover: repaired offspring violates 4-day packing (%v) — falling back to parent1 clone", errs)
+			return cloneParentAsOffspring(parent1, default_encoding_resource, curriculums, selected_semester)
+		}
+
+		if errs := ValidateInstructorUnitLoad(repaired_sched, curriculums, instructor_id_to_instructor, selected_semester); len(errs) > 0 {
+			log.Printf("Crossover: repaired offspring violates instructor unit cap (%v) — falling back to parent1 clone", errs)
+			return cloneParentAsOffspring(parent1, default_encoding_resource, curriculums, selected_semester)
+		}
+
 		return &SchedAndResources{
 			UniSched:  repaired_sched,
 			Resources: repaired_encoding_resource,
@@ -526,6 +536,16 @@ func Crossover(
 
 	if errs := HorizontalValidation(offspring, curriculums, department_to_encode, selected_semester); len(errs) > 0 {
 		return nil, fmt.Errorf("crossover offspring failed horizontal validation: %v", errs)
+	}
+
+	if errs := ValidateFourDayPacking(offspring, curriculums, department_to_encode, selected_semester); len(errs) > 0 {
+		log.Printf("Crossover: offspring violates 4-day packing (%v) — falling back to parent1 clone", errs)
+		return cloneParentAsOffspring(parent1, default_encoding_resource, curriculums, selected_semester)
+	}
+
+	if errs := ValidateInstructorUnitLoad(offspring, curriculums, instructor_id_to_instructor, selected_semester); len(errs) > 0 {
+		log.Printf("Crossover: offspring violates instructor unit cap (%v) — falling back to parent1 clone", errs)
+		return cloneParentAsOffspring(parent1, default_encoding_resource, curriculums, selected_semester)
 	}
 
 	return &SchedAndResources{

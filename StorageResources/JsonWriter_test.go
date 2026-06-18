@@ -39,7 +39,7 @@ func TestJsonFilePersistence_Update(t *testing.T) {
 
 	updated_instructor := instructors[2]
 
-	if backup_instructor == instructors[2] {
+	if reflect.DeepEqual(backup_instructor, instructors[2]) {
 		t.Error("that should not be equal anymore")
 	}
 
@@ -81,12 +81,12 @@ func TestJsonFilePersistence_Update(t *testing.T) {
 	for _, instructor := range instructors {
 		if instructor.FirstName == new_instructor.FirstName {
 			new_instructor.InstructorID = instructor.InstructorID
-			if instructor == new_instructor {
+			if reflect.DeepEqual(instructor, new_instructor) {
 				has_found_new_instructor = true
 			}
 		}
 
-		if updated_instructor == instructor {
+		if reflect.DeepEqual(updated_instructor, instructor) {
 			has_updated = true
 		}
 	}

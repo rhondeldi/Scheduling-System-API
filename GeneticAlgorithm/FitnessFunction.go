@@ -12,6 +12,35 @@ import (
 
 const PREFERRED_MAX_CLASS_HOUR_PER_DAY float64 = 10.0
 
+// EARLY_MORNING_CLASS_SLOT is the time slot for the 7:00am start (slot 0, since
+// the teaching day begins at 7:00am). Days whose first class lands on this slot
+// are penalised so the GA avoids scheduling too many 7am classes; days that
+// start later are rewarded.
+const EARLY_MORNING_CLASS_SLOT int = 0
+
+// Tuned up so avoiding a 7:00am start carries weight comparable to the
+// after-5pm term (±4): without this the GA preferred the cheaper after-5pm
+// reward and kept starting days at 7am. 7am avoidance is fitness-only — an
+// encoder-level slot-0 skip was tried but reverted because it broke genesis
+// feasibility for dense sections (see GenerateIndividual.go).
+const EARLY_MORNING_CLASS_PENALTY float64 = 4.0
+const EARLY_MORNING_CLASS_REWARD float64 = 2.0
+
+// Per-day subject-count preference: a class day with only ONE subject is
+// penalised, while days holding 2 or 3 subjects are rewarded, so the GA avoids
+// isolating a single subject on its own day and instead packs 2-3 subjects per
+// day. Days with 4+ subjects are left neutral so dense curricula can still fit.
+const LONELY_SUBJECT_DAY_PENALTY float64 = 4.0
+const BALANCED_SUBJECT_DAY_REWARD float64 = 2.0
+
+// SATURDAY_NON_NSTP_PENALTY is subtracted for each regular (non-NSTP,
+// non-SaturdayOnly) subject placed on Saturday, keeping Saturday reserved mainly
+// for the 1st-year NSTP classes instead of crowding it with regular subjects.
+// Tuned up (was 4.0): the per-day score is averaged over all class days before
+// the week-level adjustment, which dilutes a Saturday-only penalty, so it needs
+// a larger raw value to meaningfully steer regular classes off Saturday.
+const SATURDAY_NON_NSTP_PENALTY float64 = 6.0
+
 /*
 * Output Range:
 
@@ -96,6 +125,7 @@ func MeasureWeekTimeTableBasicFitness(week_sched Schedule.WeekTimeTable, subject
 		has_class_after_5pm := false
 		has_time_for_lunch := false
 		day_total_hours := 0.0
+		earliest_class_slot := -1
 		day_subject_ids := make(map[uint16]bool)
 
 		for time_slot := range Const.N_DAILY_TIME_SLOTS {
@@ -103,6 +133,11 @@ func MeasureWeekTimeTableBasicFitness(week_sched Schedule.WeekTimeTable, subject
 			if subject_id > 0 {
 				day_total_hours += (1.0 / float64(Const.N_HOUR_TIME_SLOTS))
 				day_subject_ids[subject_id] = true
+
+				// remember the first occupied slot to detect 7am starts.
+				if earliest_class_slot == -1 {
+					earliest_class_slot = time_slot
+				}
 
 				// mark if there is any class after 5pm (slot index >= 20)
 				if time_slot >= 20 {
@@ -139,11 +174,41 @@ func MeasureWeekTimeTableBasicFitness(week_sched Schedule.WeekTimeTable, subject
 			week_sched_fitness += 4.0
 		}
 
+		// 7am classes are punished, later starts are rewarded, so the GA avoids
+		// scheduling too many early-morning (7:00am) classes.
+		if earliest_class_slot == EARLY_MORNING_CLASS_SLOT {
+			week_sched_fitness -= EARLY_MORNING_CLASS_PENALTY
+		} else {
+			week_sched_fitness += EARLY_MORNING_CLASS_REWARD
+		}
+
 		// class hours beyond the prefered are punished, below are rewarded
 		if day_total_hours > PREFERRED_MAX_CLASS_HOUR_PER_DAY {
 			week_sched_fitness -= 3.5
 		} else {
 			week_sched_fitness += 3.5
+		}
+
+		// prefer 2-3 subjects per class day: a day with a single subject is
+		// penalised, days with 2 or 3 subjects are rewarded. 4+ is left neutral
+		// so dense curricula can still be scheduled.
+		day_subject_count := len(day_subject_ids)
+		if day_subject_count == 1 {
+			week_sched_fitness -= LONELY_SUBJECT_DAY_PENALTY
+		} else if day_subject_count == 2 || day_subject_count == 3 {
+			week_sched_fitness += BALANCED_SUBJECT_DAY_REWARD
+		}
+
+		// keep Saturday reserved for NSTP: penalise each regular (non-NSTP,
+		// non-SaturdayOnly) subject scheduled on Saturday so it is not crowded
+		// with classes that belong on weekdays. Skipped when the allowed-set is
+		// not initialised (outside a GA run).
+		if day == (Const.N_WEEKLY_SCHOOL_DAYS-1) && saturdayAllowedSubjectIDs != nil {
+			for subjectID := range day_subject_ids {
+				if !saturdayAllowedSubjectIDs[subjectID] {
+					week_sched_fitness -= SATURDAY_NON_NSTP_PENALTY
+				}
+			}
 		}
 
 		// long class hours during saturday are punished, short hours are rewarded
@@ -175,6 +240,17 @@ func MeasureWeekTimeTableBasicFitness(week_sched Schedule.WeekTimeTable, subject
 			} else if len(day_blocks) > 1 {
 				// reward if multiple subjects and all gaps are correct
 				week_sched_fitness += gapConfig.Reward
+			}
+
+			// graded LONG-gap penalty: on top of the per-violation penalty above,
+			// subtract an amount proportional to how many HOURS the day's gaps run
+			// beyond the allowed maximum, so a very long gap is penalised much more
+			// than a slightly-too-long one. This steers the GA toward compact days
+			// instead of schedules with large idle gaps between subjects.
+			excess_gap_slots := TotalExcessGapSlots(week_sched[day], gapConfig.MaxGapSlots)
+			if excess_gap_slots > 0 {
+				week_sched_fitness -= gapConfig.Penalty *
+					(float64(excess_gap_slots) / float64(Const.N_HOUR_TIME_SLOTS))
 			}
 		}
 	}

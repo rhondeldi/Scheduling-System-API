@@ -227,6 +227,25 @@ func CheckGapsBetweenSubjects(day Schedule.DayTimeTable, minGapSlots, maxGapSlot
 	return violations
 }
 
+// TotalExcessGapSlots returns, for a single day, the sum of slots by which
+// inter-subject gaps exceed maxGapSlots (0 when no gap is too long). It is used
+// by the fitness function to grade the long-gap penalty: the further a gap runs
+// beyond the allowed maximum, the harder the schedule is penalised, steering the
+// GA toward compact days with short gaps between subjects.
+func TotalExcessGapSlots(day Schedule.DayTimeTable, maxGapSlots int) int {
+	blocks := ExtractSubjectBlocks(day)
+	excess := 0
+
+	for i := 0; i < len(blocks)-1; i++ {
+		gapSlots := blocks[i+1].StartSlot - blocks[i].EndSlot
+		if gapSlots > maxGapSlots {
+			excess += gapSlots - maxGapSlots
+		}
+	}
+
+	return excess
+}
+
 // CountGapViolations returns the total number of gap violations across all days
 // in a week schedule.
 func CountGapViolations(week Schedule.WeekTimeTable, minGapSlots, maxGapSlots int) int {

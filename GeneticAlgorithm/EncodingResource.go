@@ -335,6 +335,20 @@ func GenerateEncodingResourceFromUniTimeTable(
 	//                           RE-CREATE ENCODING RESOURCE DATA
 	//////////////////////////////////////////////////////////////////////////////////////
 
+	// subject id -> credit units, used to seed each instructor's AssignedUnits from
+	// the (frozen) base schedule so the generation-time unit cap accounts for an
+	// instructor's load in OTHER departments / already-placed sections too.
+	subject_id_to_units := make(map[uint16]uint8)
+	for _, curriculum := range curriculums {
+		for _, year_level := range curriculum.YearLevels {
+			for _, semester := range year_level.Semesters {
+				for _, subject := range semester.Subjects {
+					subject_id_to_units[subject.ID] = subject.Units
+				}
+			}
+		}
+	}
+
 	IterateSectionsWeekSchedule(university_schedules, curriculums, selected_semester, nil, nil,
 		func(indicies IterIndices, values IterValues) IterReturnType {
 			// If there is no week schedule for this section, skip it.
@@ -372,6 +386,7 @@ func GenerateEncodingResourceFromUniTimeTable(
 						if !has_subject_id {
 							encode_resource.IsSchedIdxToSubIdToSkip[uint16(indicies.Usi)][subject_id] = true
 							encode_resource.IdToInstructor[instructor_id].AssignedSubjects++
+							encode_resource.IdToInstructor[instructor_id].AssignedUnits += uint16(subject_id_to_units[subject_id])
 						}
 
 						encode_resource.IdToInstructor[instructor_id].TotalTeachingHours += (1.0 / Const.N_HOUR_TIME_SLOTS)

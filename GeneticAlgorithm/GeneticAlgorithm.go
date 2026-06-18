@@ -911,6 +911,16 @@ func RunGeneticAlgorithm(
 		return nil, nil, fmt.Errorf("unable to generate instructor id to instructor map: %w", err)
 	}
 
+	// gaLoadConstraintErrors enforces the two new hard constraints — the 4-day
+	// packing rule and the per-instructor weekly unit cap — at the same gates as
+	// HorizontalValidation. Kept separate from HV so non-GA serve routes don't
+	// retroactively reject pre-existing schedules (see LoadConstraints.go).
+	gaLoadConstraintErrors := func(sched Schedule.UniTimeTables) []error {
+		errs := ValidateFourDayPacking(sched, curriculums, department_to_encode, selected_semester)
+		errs = append(errs, ValidateInstructorUnitLoad(sched, curriculums, default_instructor_id_to_instructor, selected_semester)...)
+		return errs
+	}
+
 	classicFitnessCache := make(map[fitnessCacheKey]float64)
 	annFitnessCache := make(map[fitnessCacheKey]float64)
 
@@ -1034,6 +1044,11 @@ func RunGeneticAlgorithm(
 	// gapConfig consulted by the fitness function, the encoder and horizontal
 	// validation. GA_MIN_GAP_HOURS=0 disables it entirely (backward compatible).
 	gapCfg := LoadGapConfigFromEnv()
+
+	// Build the set of subjects allowed on Saturday (NSTP 1/2 + SaturdayOnly) so
+	// the fitness function keeps Saturday reserved for NSTP and steers regular
+	// subjects onto weekdays.
+	SetSaturdayAllowedSubjects(curriculums)
 
 	bestFitnessSeen := math.Inf(-1)
 	stagnantGenerations := 0
@@ -1863,6 +1878,12 @@ func RunGeneticAlgorithm(
 				population[i].Resources = prev_encoding_resource
 				continue
 			}
+			if errs := gaLoadConstraintErrors(population[i].UniSched); len(errs) > 0 {
+				log.Printf("RunGeneticAlgorithm: load-constraint (units/4-day) violation after mutation index [%d]; reverting\n%v", i, errs)
+				population[i].UniSched = prev_uni_sched
+				population[i].Resources = prev_encoding_resource
+				continue
+			}
 
 			re_encode_tries := 0
 			for re_encode_tries < MAX_RE_ENCODE_REPAIR_TRIALS {
@@ -1927,6 +1948,12 @@ func RunGeneticAlgorithm(
 				}
 				if errs := HorizontalValidation(population[i].UniSched, curriculums, department_to_encode, selected_semester); len(errs) > 0 {
 					log.Printf("RunGeneticAlgorithm: repaired schedule still horizontally invalid at mutation index [%d]; reverting\n%v", i, errs)
+					population[i].UniSched = prev_uni_sched
+					population[i].Resources = prev_encoding_resource
+					continue
+				}
+				if errs := gaLoadConstraintErrors(population[i].UniSched); len(errs) > 0 {
+					log.Printf("RunGeneticAlgorithm: repaired schedule violates load constraints (units/4-day) at mutation index [%d]; reverting\n%v", i, errs)
 					population[i].UniSched = prev_uni_sched
 					population[i].Resources = prev_encoding_resource
 					continue
@@ -2232,6 +2259,11 @@ func RunGeneticAlgorithm(
 	if errs := HorizontalValidation(genesis_population[0].UniSched, curriculums, department_to_encode, selected_semester); len(errs) > 0 {
 		log.Printf("GA-ERROR: horizontal violations in fittest schedule:\n%v", errs)
 		return nil, nil, errors.New("fittest university schedule has horizontal violations")
+	}
+
+	if errs := gaLoadConstraintErrors(genesis_population[0].UniSched); len(errs) > 0 {
+		log.Printf("GA-ERROR: load-constraint (units/4-day) violations in fittest schedule:\n%v", errs)
+		return nil, nil, errors.New("fittest university schedule violates instructor unit cap or 4-day packing constraint")
 	}
 
 	if err := ValidateNoUnexpectedEmptySections(

@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/mrdcvlsc/scheduling-system-backend/Auth"
-	"github.com/mrdcvlsc/scheduling-system-backend/Resources/Curriculum"
 	"github.com/mrdcvlsc/scheduling-system-backend/RouteGlobals"
 	"github.com/mrdcvlsc/scheduling-system-backend/Routes/RoutesV1"
 )
@@ -83,31 +82,50 @@ func GetInstructorSubjects(ctx *gin.Context) {
 		return
 	}
 
-	allSubjects, errReadSubjects := RouteGlobals.ResourcesPersistence.ReaderService.ReadAllSubjects()
-	if errReadSubjects != nil {
-		ctx.String(http.StatusInternalServerError, "unable to read subjects")
+	allCurriculums, errReadCurriculums := RouteGlobals.ResourcesPersistence.ReaderService.ReadAllCurriculum()
+	if errReadCurriculums != nil {
+		ctx.String(http.StatusInternalServerError, "unable to read curriculums")
 		return
 	}
 
-	subjectIDToSubject := make(map[uint16]Curriculum.Subject)
-	for _, subject := range allSubjects {
-		subjectIDToSubject[subject.ID] = subject
-	}
+	// The subjects assigned to an instructor are defined in the curriculum:
+	// each curriculum subject carries the IDs of the instructors designated to
+	// teach it. Walk every curriculum's subjects and collect the ones whose
+	// DesignatedInstructors include this instructor, de-duplicating by subject ID.
+	seenSubjectIDs := make(map[uint16]bool)
+	items := make([]InstructorSubjectItem, 0)
 
-	items := make([]InstructorSubjectItem, 0, len(instructor.DesignatedSubjectIDs))
-	for _, designatedSubjectID := range instructor.DesignatedSubjectIDs {
-		subject, hasSubject := subjectIDToSubject[designatedSubjectID]
-		if !hasSubject {
-			continue
+	for _, curriculum := range allCurriculums {
+		for _, yearLevel := range curriculum.YearLevels {
+			for _, semester := range yearLevel.Semesters {
+				for _, subject := range semester.Subjects {
+					isDesignated := false
+					for _, designatedInstructorID := range subject.DesignatedInstructors {
+						if designatedInstructorID == instructor.InstructorID {
+							isDesignated = true
+							break
+						}
+					}
+
+					if !isDesignated || seenSubjectIDs[subject.ID] {
+						continue
+					}
+
+					seenSubjectIDs[subject.ID] = true
+					items = append(items, InstructorSubjectItem{
+						SubjectID: subject.ID,
+						Code:      subject.Code,
+						Name:      subject.Name,
+						Units:     subject.LecHours + subject.LabHours,
+					})
+				}
+			}
 		}
-
-		items = append(items, InstructorSubjectItem{
-			SubjectID: subject.ID,
-			Code:      subject.Code,
-			Name:      subject.Name,
-			Units:     subject.LecHours + subject.LabHours,
-		})
 	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Code < items[j].Code
+	})
 
 	ctx.JSON(http.StatusOK, items)
 }

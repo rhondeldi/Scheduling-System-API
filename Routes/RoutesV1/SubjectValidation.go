@@ -14,6 +14,9 @@ type SubjectUpsertPayload struct {
 	Name                  string   `json:"Name"`
 	LecHours              uint8    `json:"LecHours"`
 	LabHours              uint8    `json:"LabHours"`
+	LecUnits              uint8    `json:"LecUnits"`
+	LabUnits              uint8    `json:"LabUnits"`
+	Units                 uint8    `json:"Units"`
 	BitFlags              uint16   `json:"BitFlags"`
 	DesignatedInstructors []uint16 `json:"DesignatedInstructorsID"`
 	SubjectType           string   `json:"SubjectType"`
@@ -32,6 +35,8 @@ func buildSubjectFromPayload(payload SubjectUpsertPayload) Curriculum.Subject {
 		Name:                  payload.Name,
 		LecHours:              payload.LecHours,
 		LabHours:              payload.LabHours,
+		LecUnits:              payload.LecUnits,
+		LabUnits:              payload.LabUnits,
 		BitFlags:              payload.BitFlags,
 		DesignatedInstructors: payload.DesignatedInstructors,
 		SubjectType:           payload.SubjectType,
@@ -94,6 +99,9 @@ func normalizeAndValidateSubjectPayload(subject *Curriculum.Subject) error {
 	if subject.AsynchronousHours > float64(subject.LecHours) {
 		return errors.New("asynchronous hours cannot exceed lecture hours")
 	}
+
+	// total credit units is always the sum of the lecture and laboratory units.
+	subject.Units = subject.LecUnits + subject.LabUnits
 
 	subject.NormalizeAsyncConfig()
 

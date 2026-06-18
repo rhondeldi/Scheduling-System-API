@@ -20,6 +20,8 @@ func (s *MongodbWriter) CreateInstructor(arg_instructor Instructors.Instructor) 
 		FirstName:     arg_instructor.FirstName,
 		MiddleInitial: arg_instructor.MiddleInitial,
 		LastName:      arg_instructor.LastName,
+		EmploymentType: arg_instructor.EmploymentType,
+		MaxUnits:       arg_instructor.MaxUnits,
 		DesignatedSubjectIDs: arg_instructor.DesignatedSubjectIDs,
 	}
 
@@ -93,6 +95,8 @@ func (s *MongodbWriter) UpdateInstructor(arg_updated_instructor Instructors.Inst
 		FirstName:     arg_updated_instructor.FirstName,
 		MiddleInitial: arg_updated_instructor.MiddleInitial,
 		LastName:      arg_updated_instructor.LastName,
+		EmploymentType: arg_updated_instructor.EmploymentType,
+		MaxUnits:       arg_updated_instructor.MaxUnits,
 		DesignatedSubjectIDs: arg_updated_instructor.DesignatedSubjectIDs,
 	}
 

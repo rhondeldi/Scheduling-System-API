@@ -178,6 +178,9 @@ func main() {
 	v2.GET("instructor_basic", RoutesV2.GetInstructorBasic)
 	v2.GET("instructors", RoutesV2.GetDepartmentInstructors)
 	v2.GET("instructor_resources", RoutesV2.GetInstructorResource)
+	v2.GET("instructor_subjects", RoutesV2.GetInstructorSubjects)
+	v2.POST("instructor_subject_add", RoutesV2.PostInstructorSubjectAdd)
+	v2.DELETE("instructor_subject_remove", RoutesV2.DeleteInstructorSubjectRemove)
 
 	// ============= room routes and handlers =============
 

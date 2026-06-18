@@ -84,6 +84,29 @@ func (bitset *InstructorTimeSlotBitMap) GetAvailability(day, time_slot int) bool
 	return ((bitset[limb_idx] >> limb_bit_idx) & uint64(1)) == 0
 }
 
+// CountAvailableSlots returns the number of weekly time slots the instructor is
+// marked available for (a 0-bit means available). Only the valid
+// N_WEEKLY_TIME_SLOTS range is counted, so unused high bits in the final limb
+// (which are 0 and would otherwise read as "available") are not included.
+func (bitset *InstructorTimeSlotBitMap) CountAvailableSlots() int {
+	available := 0
+	for day := 0; day < Const.N_WEEKLY_SCHOOL_DAYS; day++ {
+		for time_slot := 0; time_slot < Const.N_DAILY_TIME_SLOTS; time_slot++ {
+			if bitset.GetAvailability(day, time_slot) {
+				available++
+			}
+		}
+	}
+	return available
+}
+
+// CountAvailableHours returns the number of whole teaching hours the instructor
+// is available for across the week (each hour spans N_HOUR_TIME_SLOTS slots).
+// Used to derive a part-time instructor's unit cap from their availability.
+func (bitset *InstructorTimeSlotBitMap) CountAvailableHours() uint8 {
+	return uint8(bitset.CountAvailableSlots() / Const.N_HOUR_TIME_SLOTS)
+}
+
 func (bitset *InstructorTimeSlotBitMap) Serialize() []byte {
 	serialized := make([]byte, (INSTRUCTOR_TIME_SLOT_MAP_LIMBS * (BITSET_LIMB_WIDENESS / BITS_PER_BYTE)))
 
